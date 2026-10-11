@@ -1,7 +1,34 @@
-# Codemagic build: universal (Apple Silicon + Intel) macOS .dmg.
-# Start it from the Codemagic dashboard ("Start new build" → workflow "YMClient macOS");
-# the .dmg shows up under the build's Artifacts.
+# Codemagic builds:
+#   ios       → unsigned YMClient.ipa (sideload with Sideloadly)
+#   macos     → universal (Apple Silicon + Intel) YMClient .dmg
+#   ios-probe → unsigned YMProbe.ipa (background-playback test app)
+# Start one from the Codemagic dashboard ("Start new build" → pick the workflow);
+# the .ipa / .dmg shows up under the build's Artifacts.
 workflows:
+  ios:
+    name: YMClient iOS (unsigned IPA)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      node: lts
+    scripts:
+      - name: Install Rust
+        script: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          fi
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> "$CM_ENV"
+          "$HOME/.cargo/bin/rustup" target add aarch64-apple-ios
+
+      - name: Install npm dependencies
+        script: npm ci
+
+      - name: Build unsigned YMClient.ipa
+        script: bash scripts/build-unsigned-ipa.sh
+
+    artifacts:
+      - YMClient.ipa
+
   macos:
     name: YMClient macOS
     instance_type: mac_mini_m2
