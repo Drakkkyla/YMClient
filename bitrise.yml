@@ -2,18 +2,24 @@
 #   ios-probe → unsigned YMProbe.ipa (sideload with Sideloadly)
 #   macos     → universal YMClient .dmg
 # Results appear on the build page under "Artifacts".
-# Stack = macOS image with Xcode (Bitrise requires it in the YAML). If Bitrise says the stack
-# doesn't exist, copy the exact ID from Workflow Editor → "Stacks & Machines".
-format_version: "13"
+# Stack/machine are the values Bitrise's own setup wizard generated for this workspace; Bitrise
+# validates them per workflow, so they're repeated in each one. No triggers on purpose: builds
+# start by hand, so pushes don't burn the free minutes.
+format_version: "26"
 default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
 project_type: other
 
 meta:
   bitrise.io:
-    stack: osx-xcode-27.0.x
+    stack: osx-xcode-latest-stable
+    machine_type_id: g2.mac.large
 
 workflows:
   ios-probe:
+    meta:
+      bitrise.io:
+        stack: osx-xcode-latest-stable
+        machine_type_id: g2.mac.large
     steps:
       - git-clone@8: {}
       - script@1:
@@ -39,6 +45,10 @@ workflows:
       - deploy-to-bitrise-io@2: {}
 
   macos:
+    meta:
+      bitrise.io:
+        stack: osx-xcode-latest-stable
+        machine_type_id: g2.mac.large
     steps:
       - git-clone@8: {}
       - script@1:
