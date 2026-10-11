@@ -1,72 +1,44 @@
-# Bitrise CI — same two builds as codemagic.yaml.
-#   ios-probe → unsigned YMProbe.ipa (sideload with Sideloadly)
-#   macos     → universal YMClient .dmg
-# Results appear on the build page under "Artifacts".
-# Stack/machine are the values Bitrise's own setup wizard generated for this workspace; Bitrise
-# validates them per workflow, so they're repeated in each one. No triggers on purpose: builds
-# start by hand, so pushes don't burn the free minutes.
-format_version: "26"
+---
+# Bitrise CI: builds the unsigned YMProbe.ipa (iOS background-playback probe) for Sideloadly.
+# Shaped exactly like the config Bitrise's setup wizard generated (workflow "primary", stack in
+# both places) because its editor rejects other workflow names with "Stack is required".
+# No triggers on purpose: start builds by hand so pushes don't burn the free minutes.
+# The macOS .dmg build lives in codemagic.yaml.
+format_version: '26'
 default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
 project_type: other
-
+workflows:
+  primary:
+    steps:
+    - activate-ssh-key@4:
+        run_if: '{{getenv "SSH_RSA_PRIVATE_KEY" | ne ""}}'
+    - git-clone@8: {}
+    - script@1:
+        title: Install Rust
+        inputs:
+        - content: |-
+            set -euo pipefail
+            if ! command -v rustup >/dev/null 2>&1; then
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            fi
+            # envman carries PATH over to the following steps.
+            envman add --key PATH --value "$HOME/.cargo/bin:$PATH"
+            "$HOME/.cargo/bin/rustup" target add aarch64-apple-ios
+    - script@1:
+        title: Build unsigned YMProbe.ipa
+        inputs:
+        - content: |-
+            set -euo pipefail
+            cd ios-probe
+            npm ci
+            bash scripts/build-unsigned-ipa.sh
+            cp YMProbe.ipa "$BITRISE_DEPLOY_DIR/"
+    - deploy-to-bitrise-io@2: {}
+    meta:
+      bitrise.io:
+        stack: osx-xcode-latest-stable
+        machine_type_id: g2.mac.large
 meta:
   bitrise.io:
     stack: osx-xcode-latest-stable
     machine_type_id: g2.mac.large
-
-workflows:
-  ios-probe:
-    meta:
-      bitrise.io:
-        stack: osx-xcode-latest-stable
-        machine_type_id: g2.mac.large
-    steps:
-      - git-clone@8: {}
-      - script@1:
-          title: Install Rust
-          inputs:
-            - content: |-
-                set -euo pipefail
-                if ! command -v rustup >/dev/null 2>&1; then
-                  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-                fi
-                # envman carries PATH over to the following steps.
-                envman add --key PATH --value "$HOME/.cargo/bin:$PATH"
-                "$HOME/.cargo/bin/rustup" target add aarch64-apple-ios
-      - script@1:
-          title: Build unsigned YMProbe.ipa
-          inputs:
-            - content: |-
-                set -euo pipefail
-                cd ios-probe
-                npm ci
-                bash scripts/build-unsigned-ipa.sh
-                cp YMProbe.ipa "$BITRISE_DEPLOY_DIR/"
-      - deploy-to-bitrise-io@2: {}
-
-  macos:
-    meta:
-      bitrise.io:
-        stack: osx-xcode-latest-stable
-        machine_type_id: g2.mac.large
-    steps:
-      - git-clone@8: {}
-      - script@1:
-          title: Install Rust
-          inputs:
-            - content: |-
-                set -euo pipefail
-                if ! command -v rustup >/dev/null 2>&1; then
-                  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-                fi
-                envman add --key PATH --value "$HOME/.cargo/bin:$PATH"
-                "$HOME/.cargo/bin/rustup" target add aarch64-apple-darwin x86_64-apple-darwin
-      - script@1:
-          title: Build universal .dmg
-          inputs:
-            - content: |-
-                set -euo pipefail
-                npm ci
-                npm run tauri build -- --target universal-apple-darwin
-                cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg "$BITRISE_DEPLOY_DIR/"
-      - deploy-to-bitrise-io@2: {}
