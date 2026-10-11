@@ -1,0 +1,28 @@
+# Codemagic build: universal (Apple Silicon + Intel) macOS .dmg.
+# Start it from the Codemagic dashboard ("Start new build" → workflow "YMClient macOS");
+# the .dmg shows up under the build's Artifacts.
+workflows:
+  macos:
+    name: YMClient macOS
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      node: lts
+    scripts:
+      - name: Install Rust
+        script: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          fi
+          # Each script runs in a fresh shell; CM_ENV carries PATH over to the next steps.
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> "$CM_ENV"
+          "$HOME/.cargo/bin/rustup" target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Install npm dependencies
+        script: npm ci
+
+      - name: Build .dmg
+        script: npm run tauri build -- --target universal-apple-darwin
+
+    artifacts:
+      - src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
