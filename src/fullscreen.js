@@ -153,6 +153,35 @@ fs.addEventListener("dblclick", (e) => {
   if (!e.target.closest("button, .slider, .link")) setOsFullscreen(!fs.classList.contains("os-full"));
 });
 
+// Phone: swipe the player down to close it.
+let swipe = null;
+fs.addEventListener(
+  "touchstart",
+  (e) => {
+    if (e.touches.length !== 1 || e.target.closest(".slider")) return;
+    swipe = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  },
+  { passive: true },
+);
+fs.addEventListener(
+  "touchmove",
+  (e) => {
+    if (!swipe) return;
+    const dy = e.touches[0].clientY - swipe.y;
+    const dx = Math.abs(e.touches[0].clientX - swipe.x);
+    $(".fs-main").style.transform = dy > 0 && dy > dx ? `translateY(${dy * 0.6}px)` : "";
+  },
+  { passive: true },
+);
+fs.addEventListener("touchend", (e) => {
+  if (!swipe) return;
+  const dy = e.changedTouches[0].clientY - swipe.y;
+  const dx = Math.abs(e.changedTouches[0].clientX - swipe.x);
+  swipe = null;
+  $(".fs-main").style.transform = "";
+  if (dy > 110 && dy > dx * 1.5) close();
+});
+
 document.addEventListener("keydown", (e) => {
   if (!isOpen || e.key !== "Escape" || document.querySelector(".menu, .modal-backdrop")) return;
   close();

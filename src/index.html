@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>YMClient</title>
     <script type="module" src="/main.js" defer></script>
   </head>
@@ -104,6 +104,14 @@
       </div>
     </footer>
 
+    <!-- Phone layout only (see the max-width: 760px block in styles.css). -->
+    <nav class="tabbar" aria-label="Разделы">
+      <button class="tab-item" data-go="wave"><i class="ph ph-waveform"></i><span>Волна</span></button>
+      <button class="tab-item" data-go="search"><i class="ph ph-magnifying-glass"></i><span>Поиск</span></button>
+      <button class="tab-item" data-go="library" data-tab="playlists"><i class="ph ph-books"></i><span>Медиатека</span></button>
+      <button class="tab-item" data-action="settings"><i class="ph ph-user-circle"></i><span>Профиль</span></button>
+    </nav>
+
     <section class="fs" id="fs" aria-label="Сейчас играет" hidden>
       <div class="fs-bg" aria-hidden="true">
         <img class="fs-bg-cover" id="fsBgCover" alt="" />
@@ -139,6 +147,7 @@
             <button class="icon-btn" id="fsLike" data-action="like-current" aria-label="Нравится"><i class="ph ph-heart"></i></button>
             <button class="icon-btn" data-action="add-current" aria-label="Добавить в плейлист"><i class="ph ph-plus-circle"></i></button>
             <button class="icon-btn fs-dislike" data-action="dislike" aria-label="Не нравится"><i class="ph ph-heart-break"></i></button>
+            <button class="icon-btn fs-queue" data-action="queue" aria-label="Очередь"><i class="ph ph-queue"></i></button>
           </div>
         </div>
       </div>

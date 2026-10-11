@@ -1,5 +1,6 @@
-# CircleCI: the same two builds as codemagic.yaml, on Apple Silicon (M4 Pro) Macs.
-#   ios-probe → unsigned YMProbe.ipa (sideload with Sideloadly)
+# CircleCI builds on Apple Silicon (M4 Pro) Macs:
+#   ios       → unsigned YMClient.ipa — the full app for iPhone (sideload with Sideloadly)
+#   ios-probe → unsigned YMProbe.ipa (background-playback test app)
 #   macos     → universal YMClient .dmg
 # Every push creates a pipeline that WAITS for approval: click "Approve" on the build you want
 # in the CircleCI UI. Nothing runs on a Mac (and no credits are spent) until you do.
@@ -37,6 +38,23 @@ commands:
             npm -v
 
 jobs:
+  ios:
+    executor: mac
+    steps:
+      - checkout
+      - setup-toolchain:
+          rust-targets: aarch64-apple-ios
+      - run:
+          name: Install npm dependencies
+          command: npm ci
+      - run:
+          name: Build unsigned YMClient.ipa
+          no_output_timeout: 30m
+          command: bash scripts/build-unsigned-ipa.sh
+      - store_artifacts:
+          path: YMClient.ipa
+          destination: YMClient.ipa
+
   ios-probe:
     executor: mac
     steps:
@@ -79,6 +97,10 @@ jobs:
 workflows:
   build:
     jobs:
+      - approve-ios:
+          type: approval
+      - ios:
+          requires: [approve-ios]
       - approve-ios-probe:
           type: approval
       - ios-probe:

@@ -271,8 +271,11 @@ export async function search(root, _params, alive) {
     <div id="results">${lastQuery ? "" : empty("ph-music-notes", "Начните вводить запрос")}</div>`;
   const input = root.querySelector("#q");
   const results = root.querySelector("#results");
-  input.focus();
-  input.select();
+  // On a phone, don't pop the keyboard up just because the tab was opened.
+  if (!matchMedia("(max-width: 760px)").matches) {
+    input.focus();
+    input.select();
+  }
   let timer;
   input.addEventListener("input", () => {
     clearTimeout(timer);

@@ -9,13 +9,24 @@ import { toast } from "./ui.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 
-/** Audio goes through the Rust `ymstream:` proxy so CORS never depends on the page origin
- *  (macOS serves the page from tauri://localhost, which the CDN doesn't allow). */
-const streamSrc = (url) => convertFileSrc(url, "ymstream");
+/**
+ * iOS plays through a plain <audio> element straight from the CDN — no Web Audio, no proxy.
+ * The YMProbe test showed iOS keeps such an element playing (and our JS running) with the
+ * screen locked, but puts an AudioContext into "interrupted" the moment the app goes to the
+ * background. iOS also ignores element.volume. So on iPhone there's no EQ, analyser, crossfade
+ * or loudness normalization; everything else works the same.
+ */
+export const IOS =
+  /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+export const WEB_AUDIO = !IOS;
+
+/** Desktop audio goes through the Rust `ymstream:` proxy so CORS never depends on the page
+ *  origin (macOS serves the page from tauri://localhost, which the CDN doesn't allow). */
+const streamSrc = (url) => (WEB_AUDIO ? convertFileSrc(url, "ymstream") : url);
 
 const makeDeck = () => {
   const el = new Audio();
-  el.crossOrigin = "anonymous"; // needed for the analyser; the ymstream proxy answers with ACAO:*
+  if (WEB_AUDIO) el.crossOrigin = "anonymous"; // needed for the analyser; the ymstream proxy answers with ACAO:*
   el.preload = "auto";
   return { el, gain: null };
 };
@@ -39,6 +50,7 @@ function makeBands(ctx) {
 
 let actx, analyser, bins, preamp, master, bands = [];
 function ensureGraph() {
+  if (!WEB_AUDIO) return;
   if (actx) {
     if (actx.state === "suspended") actx.resume();
     return;

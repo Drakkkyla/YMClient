@@ -19,7 +19,11 @@ const appWindow = window.__TAURI__.window.getCurrentWindow();
 
 // macOS: native traffic lights live in the titlebar (see tauri.macos.conf.json), so our
 // Windows-style window buttons are hidden and the brand shifts right.
-if (/Mac/i.test(navigator.platform)) document.documentElement.classList.add("mac");
+if (/Mac/i.test(navigator.platform) && !player.IOS) document.documentElement.classList.add("mac");
+// iOS: plain-audio playback (see player.js) — hide controls that need Web Audio / element volume.
+if (player.IOS) document.documentElement.classList.add("ios");
+
+const isPhone = () => matchMedia("(max-width: 760px)").matches;
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -53,6 +57,8 @@ async function render() {
 
   const navKey = name === "library" ? `library:${params.tab || "playlists"}` : name;
   $$(".nav-item").forEach((b) => b.classList.toggle("active", (b.dataset.tab ? `${b.dataset.go}:${b.dataset.tab}` : b.dataset.go) === navKey));
+  const tabKey = ["library", "liked", "playlist", "album", "artist"].includes(name) ? "library" : name;
+  $$(".tab-item[data-go]").forEach((b) => b.classList.toggle("active", b.dataset.go === tabKey));
   $$(".nav-pl").forEach((b) => b.classList.toggle("active", name === "playlist" && b.dataset.uid == params.uid && b.dataset.kind == params.kind));
 
   await (views[name] || views.wave)(root, params, alive);
@@ -107,8 +113,44 @@ document.addEventListener("click", async (e) => {
   }
 
   const row = t.closest(".row[data-list]");
-  if (row) playRow(row);
+  if (row) {
+    if (longPress?.fired) return (longPress = null); // the long-press already opened the menu
+    playRow(row);
+  }
 });
+
+// Touch: long-press a track row → the same menu as right-click.
+let longPress = null;
+document.addEventListener(
+  "touchstart",
+  (e) => {
+    const row = e.target.closest(".row[data-list]");
+    if (!row || e.touches.length > 1) return;
+    const { clientX: x, clientY: y } = e.touches[0];
+    longPress = {
+      x,
+      y,
+      fired: false,
+      timer: setTimeout(() => {
+        const hit = rowTrack(row);
+        if (!hit) return;
+        longPress.fired = true;
+        trackMenu(hit.track, { x, y }, row);
+      }, 450),
+    };
+  },
+  { passive: true },
+);
+document.addEventListener(
+  "touchmove",
+  (e) => {
+    if (!longPress || longPress.fired) return;
+    const t = e.touches[0];
+    if (Math.hypot(t.clientX - longPress.x, t.clientY - longPress.y) > 10) clearTimeout(longPress.timer), (longPress = null);
+  },
+  { passive: true },
+);
+document.addEventListener("touchend", () => longPress && !longPress.fired && (clearTimeout(longPress.timer), (longPress = null)));
 
 function rowTrack(row) {
   const list = views.lists.get(row.dataset.list);
@@ -522,6 +564,10 @@ $("#queueList").addEventListener("click", (e) => {
 });
 $("#npCover").addEventListener("click", () => fullscreen.open());
 $("#npTitle").addEventListener("click", () => fullscreen.open());
+// Phone mini-player: tapping anywhere but its buttons/links opens the full-screen player.
+$(".np").addEventListener("click", (e) => {
+  if (isPhone() && !e.target.closest("button, .link, #npCover, #npTitle")) fullscreen.open();
+});
 
 // ======================= sleep timer =======================
 function sleepMenu() {
@@ -566,11 +612,11 @@ function openSettings() {
     <div class="modal" role="dialog" aria-modal="true">
       <h3>Настройки</h3>
       <div style="margin-top:10px">
-        <div class="setting">
+        <div class="setting web-audio-only">
           <div><div class="s-t">Выравнивать громкость</div><div class="s-d">Тихие и громкие треки звучат одинаково (по данным Яндекса о громкости)</div></div>
           <button class="switch${player.state.normalize ? " on" : ""}" data-s="normalize" aria-label="Выравнивание громкости"></button>
         </div>
-        <div class="setting setting-col">
+        <div class="setting setting-col web-audio-only">
           <div><div class="s-t">Плавный переход</div><div class="s-d">Треки перетекают друг в друга, а не обрываются</div></div>
           <div class="chips">${CROSSFADES.map((v) => `<button class="chip${player.state.crossfade === v ? " on" : ""}" data-s="xf" data-v="${v}">${v ? `${v} с` : "Выкл"}</button>`).join("")}</div>
         </div>

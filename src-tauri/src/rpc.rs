@@ -1,18 +1,24 @@
 //! Discord Rich Presence on a dedicated thread, so IPC hiccups never block the UI.
 //! Reconnects lazily on the next update if Discord was closed or unreachable.
 
+#[cfg(desktop)]
 use discord_rich_presence::activity::{Activity, ActivityType, Assets, Button, Timestamps};
+#[cfg(desktop)]
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use serde::Deserialize;
 use std::sync::mpsc::{self, Sender};
 use std::sync::Mutex;
 use tauri::State;
 
+#[cfg(desktop)]
 const CLIENT_ID: &str = "1555628601846661120";
+#[cfg(desktop)]
 const ICON_PLAY: &str = "https://cdn.discordapp.com/app-assets/1555628601846661120/1557056758793633892.png";
+#[cfg(desktop)]
 const ICON_PAUSE: &str = "https://cdn.discordapp.com/app-assets/1555628601846661120/1557056771267371088.png";
 
 #[derive(Deserialize)]
+#[cfg_attr(mobile, allow(dead_code))]
 pub struct Presence {
     title: String,
     artists: String,
@@ -26,6 +32,7 @@ pub struct Presence {
     end: Option<i64>,
 }
 
+#[cfg_attr(mobile, allow(dead_code))]
 enum Msg {
     Set(Presence),
     Clear,
@@ -34,6 +41,7 @@ enum Msg {
 pub struct Rpc(Mutex<Sender<Msg>>);
 
 /// Discord requires 2..=128 chars for text fields.
+#[cfg(desktop)]
 fn fit(s: &str) -> String {
     let mut s: String = s.chars().take(128).collect();
     while s.chars().count() < 2 {
@@ -42,6 +50,7 @@ fn fit(s: &str) -> String {
     s
 }
 
+#[cfg(desktop)]
 fn apply(client: &mut DiscordIpcClient, p: &Presence) -> Result<(), Box<dyn std::error::Error>> {
     let (title, artists) = (fit(&p.title), fit(&p.artists));
     let album = p.album.as_deref().map(fit);
@@ -71,6 +80,15 @@ fn apply(client: &mut DiscordIpcClient, p: &Presence) -> Result<(), Box<dyn std:
     Ok(())
 }
 
+/// On mobile there's no Discord client: updates are accepted and dropped.
+#[cfg(mobile)]
+pub fn spawn() -> Rpc {
+    let (tx, rx) = mpsc::channel::<Msg>();
+    std::thread::spawn(move || for _ in rx {});
+    Rpc(Mutex::new(tx))
+}
+
+#[cfg(desktop)]
 pub fn spawn() -> Rpc {
     let (tx, rx) = mpsc::channel::<Msg>();
     std::thread::spawn(move || {
