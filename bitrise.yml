@@ -2,10 +2,15 @@
 #   ios-probe → unsigned YMProbe.ipa (sideload with Sideloadly)
 #   macos     → universal YMClient .dmg
 # Results appear on the build page under "Artifacts".
-# The macOS stack/machine is picked in the Workflow Editor ("Stacks & Machines").
+# Stack = macOS image with Xcode (Bitrise requires it in the YAML). If Bitrise says the stack
+# doesn't exist, copy the exact ID from Workflow Editor → "Stacks & Machines".
 format_version: "13"
 default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
 project_type: other
+
+meta:
+  bitrise.io:
+    stack: osx-xcode-27.0.x
 
 workflows:
   ios-probe:
