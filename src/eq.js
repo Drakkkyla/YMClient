@@ -149,7 +149,7 @@ function drawCurve() {
   }
   const db = player.eqResponse(freqs);
   const yOf = (d) => h / 2 - (Math.max(-MAX_DB * 1.5, Math.min(MAX_DB * 1.5, d)) / (2 * MAX_DB)) * h;
-  const rgb = getComputedStyle(document.documentElement).getPropertyValue("--ambient").trim() || "255, 207, 64";
+  const rgb = getComputedStyle(document.documentElement).getPropertyValue("--ambient").trim() || "138, 99, 255";
 
   g.beginPath();
   for (let i = 0; i < freqs.length; i++) {

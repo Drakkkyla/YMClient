@@ -3,7 +3,7 @@
 //  - draws the My Wave rings on #waveCanvas when that page is open.
 import * as player from "./lib/player.js";
 
-let color = [255, 207, 64];
+let color = [138, 99, 255];
 export const setColor = (rgb) => rgb && (color = rgb);
 
 const N = 96; // ring points

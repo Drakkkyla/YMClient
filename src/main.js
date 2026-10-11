@@ -491,7 +491,7 @@ async function updateAmbient() {
   const url = t ? api.cover(t, 100) : null;
   if (url === lastAmbient) return;
   lastAmbient = url;
-  const rgb = (await sampleColor(url)) || [255, 207, 64];
+  const rgb = (await sampleColor(url)) || [138, 99, 255];
   if (url !== lastAmbient) return;
   document.documentElement.style.setProperty("--ambient", rgb.join(", "));
   viz.setColor(rgb);

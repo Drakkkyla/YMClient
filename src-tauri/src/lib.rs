@@ -113,7 +113,7 @@ const BACK_BUTTON_JS: &str = r#"(function () {
     b.href = "https://ymclient.back/";
     b.textContent = "← YMClient";
     b.style.cssText = "position:fixed;left:12px;top:calc(env(safe-area-inset-top) + 8px);z-index:2147483647;" +
-      "padding:9px 15px;border-radius:999px;background:#ffcf40;color:#111;text-decoration:none;" +
+      "padding:9px 15px;border-radius:999px;background:linear-gradient(135deg,#e07bff,#5c44fc);color:#fff;text-decoration:none;" +
       "font:600 14px -apple-system,system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.35)";
     document.body.appendChild(b);
   }
