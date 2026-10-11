@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>YMProbe</title>
+    <style>
+      :root { color-scheme: dark; --bg: #09090c; --s: rgba(255,255,255,.06); --s2: rgba(255,255,255,.1); --t: #f3f2f5; --t2: rgba(243,242,245,.6); --a: #ffcf40; --bad: #ff5a6a; --ok: #4ade80; }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      body { margin: 0; background: var(--bg); color: var(--t); font: 15px/1.45 -apple-system, system-ui, sans-serif;
+             padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px); }
+      h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; }
+      .lead { color: var(--t2); margin: 6px 0 16px; font-size: 14px; }
+      ol { margin: 0 0 18px; padding-left: 20px; color: var(--t2); font-size: 14px; }
+      .now { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 16px; background: var(--s); min-height: 76px; }
+      .now img { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; background: var(--s2); }
+      .now .t { font-weight: 600; } .now .a { color: var(--t2); font-size: 13px; }
+      .meter { height: 6px; border-radius: 6px; background: var(--s2); margin-top: 10px; overflow: hidden; }
+      .meter i { display: block; height: 100%; width: 0; background: var(--a); transition: width .08s; }
+      .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+      button { font: inherit; color: inherit; border: 0; border-radius: 14px; background: var(--s2); padding: 14px 10px; font-weight: 600; }
+      button.primary { background: var(--a); color: #111; }
+      button.on { outline: 2px solid var(--a); }
+      .mode small { display: block; font-weight: 400; font-size: 12px; opacity: .7; margin-top: 2px; }
+      .row { display: flex; gap: 10px; margin-top: 10px; } .row button { flex: 1; }
+      .status { margin-top: 12px; font-size: 13px; color: var(--t2); }
+      textarea { width: 100%; height: 300px; margin-top: 14px; border-radius: 14px; border: 1px solid var(--s2); background: #000; color: #cfd; font: 11.5px/1.4 ui-monospace, Menlo, monospace; padding: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>YMProbe</h1>
+    <p class="lead">Проверка фонового звука для iOS-версии YMClient. Играют 30-секундные превью подряд.</p>
+    <ol>
+      <li>Нажми один из режимов — музыка заиграет.</li>
+      <li>Заблокируй экран на 2–3 минуты (должно смениться 4–6 треков).</li>
+      <li>Проверь кнопки на экране блокировки.</li>
+      <li>Разблокируй, нажми «Скопировать журнал» и пришли его.</li>
+    </ol>
+
+    <div class="now"><img id="cover" alt="" /><div><div class="t" id="title">—</div><div class="a" id="artists">Ничего не играет</div></div></div>
+    <div class="meter" title="Уровень звука через Web Audio"><i id="meter"></i></div>
+
+    <div class="modes">
+      <button class="mode" data-mode="simple">Простой<small>&lt;audio&gt; напрямую</small></button>
+      <button class="mode" data-mode="webaudio">Как в YMClient<small>прокси + Web Audio</small></button>
+    </div>
+    <div class="row">
+      <button id="toggle">⏯ Пауза</button>
+      <button id="next">⏭ Дальше</button>
+    </div>
+    <div class="row">
+      <button class="primary" id="copy">Скопировать журнал</button>
+      <button id="clear">Очистить</button>
+    </div>
+    <div class="status" id="status"></div>
+    <textarea id="log" readonly></textarea>
+
+    <script src="app.js"></script>
+  </body>
+</html>
