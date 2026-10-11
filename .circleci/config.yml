@@ -1,0 +1,89 @@
+# CircleCI: the same two builds as codemagic.yaml, on Apple Silicon (M4 Pro) Macs.
+#   ios-probe → unsigned YMProbe.ipa (sideload with Sideloadly)
+#   macos     → universal YMClient .dmg
+# Every push creates a pipeline that WAITS for approval: click "Approve" on the build you want
+# in the CircleCI UI. Nothing runs on a Mac (and no credits are spent) until you do.
+# Results are under the job's "Artifacts" tab.
+version: 2.1
+
+executors:
+  mac:
+    macos:
+      xcode: 27.0.0
+    resource_class: m4pro.medium
+
+commands:
+  setup-toolchain:
+    parameters:
+      rust-targets:
+        type: string
+    steps:
+      - run:
+          name: Install Rust
+          command: |
+            if ! command -v rustup >/dev/null 2>&1; then
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            fi
+            # BASH_ENV is sourced by every following step.
+            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+            "$HOME/.cargo/bin/rustup" target add << parameters.rust-targets >>
+      - run:
+          name: Check Node
+          command: |
+            if ! command -v node >/dev/null 2>&1; then
+              HOMEBREW_NO_AUTO_UPDATE=1 brew install node
+            fi
+            node -v
+            npm -v
+
+jobs:
+  ios-probe:
+    executor: mac
+    steps:
+      - checkout
+      - setup-toolchain:
+          rust-targets: aarch64-apple-ios
+      - run:
+          name: Install npm dependencies
+          working_directory: ios-probe
+          command: npm ci
+      - run:
+          name: Build unsigned YMProbe.ipa
+          working_directory: ios-probe
+          no_output_timeout: 30m
+          command: bash scripts/build-unsigned-ipa.sh
+      - store_artifacts:
+          path: ios-probe/YMProbe.ipa
+          destination: YMProbe.ipa
+
+  macos:
+    executor: mac
+    steps:
+      - checkout
+      - setup-toolchain:
+          rust-targets: aarch64-apple-darwin x86_64-apple-darwin
+      - run:
+          name: Install npm dependencies
+          command: npm ci
+      - run:
+          name: Build universal .dmg
+          no_output_timeout: 30m
+          command: |
+            npm run tauri build -- --target universal-apple-darwin
+            mkdir -p dist-mac
+            cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg dist-mac/
+      - store_artifacts:
+          path: dist-mac
+          destination: macos
+
+workflows:
+  build:
+    jobs:
+      - approve-ios-probe:
+          type: approval
+      - ios-probe:
+          requires: [approve-ios-probe]
+      - approve-macos:
+          type: approval
+      - macos:
+          requires: [approve-macos]
