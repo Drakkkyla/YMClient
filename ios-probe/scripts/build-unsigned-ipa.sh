@@ -29,12 +29,14 @@ ruby -ryaml -e '
 ' "$YML"
 (cd src-tauri/gen/apple && xcodegen generate --spec project.yml)
 
-MARK=$(mktemp)
+rm -rf src-tauri/gen/apple/build/*.xcarchive
 npx tauri ios build --target aarch64 --archive-only --ci
 
-ARCHIVE=$(find src-tauri/gen/apple "$HOME/Library/Developer/Xcode/Archives" -maxdepth 6 -name "*.xcarchive" -newer "$MARK" 2>/dev/null | head -1)
-[ -n "$ARCHIVE" ] || { echo "xcarchive not found" >&2; exit 1; }
-APP=$(find "$ARCHIVE/Products/Applications" -maxdepth 1 -name "*.app" | head -1)
+# Tauri writes the archive to gen/apple/build/<name>_iOS.xcarchive. (Don't search folders that
+# may not exist: under `set -e -o pipefail` a failing find inside $(...) silently kills the script.)
+ARCHIVE=$(ls -dt src-tauri/gen/apple/build/*.xcarchive 2>/dev/null | head -1 || true)
+[ -n "$ARCHIVE" ] || { echo "xcarchive not found in src-tauri/gen/apple/build" >&2; ls -la src-tauri/gen/apple/build >&2 || true; exit 1; }
+APP=$(ls -d "$ARCHIVE"/Products/Applications/*.app 2>/dev/null | head -1 || true)
 [ -n "$APP" ] || { echo ".app not found in $ARCHIVE" >&2; exit 1; }
 echo "Archive: $ARCHIVE"
 echo "App:     $APP"
