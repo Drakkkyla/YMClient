@@ -68,6 +68,7 @@ export function sync() {
   if (!t) return close();
 
   fs.classList.toggle("wave", mode === "wave");
+  fs.classList.toggle("paused", !playing); // phone: artwork shrinks while paused
   const cover = api.cover(t, 1000);
   for (const img of [$("#fsCover"), $("#fsBgCover")]) if (img.getAttribute("src") !== cover) img.src = cover;
   $("#fsTitle").textContent = t.title + (t.version ? ` (${t.version})` : "");

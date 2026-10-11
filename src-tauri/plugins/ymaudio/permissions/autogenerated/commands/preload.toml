@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-preload"
+description = "Enables the preload command without any pre-configured scope."
+commands.allow = ["preload"]
+
+[[permission]]
+identifier = "deny-preload"
+description = "Denies the preload command without any pre-configured scope."
+commands.deny = ["preload"]

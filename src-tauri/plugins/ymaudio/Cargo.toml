@@ -1,0 +1,12 @@
+[package]
+name = "tauri-plugin-ymaudio"
+version = "0.1.0"
+description = "Native iOS audio engine for YMClient (AVAudioEngine: background playback, EQ, crossfade, lock screen)"
+edition = "2021"
+links = "tauri-plugin-ymaudio"
+
+[dependencies]
+tauri = { version = "2" }
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

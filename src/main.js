@@ -70,6 +70,9 @@ async function render() {
 // ======================= delegated clicks =======================
 document.addEventListener("click", async (e) => {
   const t = e.target;
+  // iOS taptic feedback on the controls that matter
+  const hap = t.closest('[data-action="toggle"], [data-action="next"], [data-action="prev"], [data-action="wave-toggle"], .tab-item');
+  if (hap) player.haptic(hap.classList.contains("tab-item") ? "selection" : "light");
 
   const win = t.closest("[data-win]");
   if (win) {
@@ -135,6 +138,7 @@ document.addEventListener(
         const hit = rowTrack(row);
         if (!hit) return;
         longPress.fired = true;
+        player.haptic("medium");
         trackMenu(hit.track, { x, y }, row);
       }, 450),
     };
@@ -169,6 +173,7 @@ async function toggleLike(track) {
   const on = !api.isLiked(track);
   try {
     await api.setLike(track, on);
+    if (on) player.haptic("success");
     syncLikes(track.id);
     if (on && player.state.mode === "wave" && String(player.state.track?.id) === String(track.id))
       api.wave.feedback(player.state.station.id, "like", track._batch, { trackId: api.trackKey(track) });
@@ -428,6 +433,7 @@ const playerEl = $("#player");
 function updatePlayer() {
   const { track: t, playing, loading, mode, shuffle, repeat } = player.state;
   playerEl.classList.toggle("wave", mode === "wave");
+  playerEl.classList.toggle("empty", !t); // phone: the floating mini player appears with the first track
   $("#npTitle").textContent = t ? t.title + (t.version ? ` (${t.version})` : "") : "Ничего не играет";
   $("#npArtists").innerHTML = t ? views.artistLinks(t) : "Запустите Мою волну";
   const cov = t ? api.cover(t, 200) : "";

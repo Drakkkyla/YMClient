@@ -10,27 +10,121 @@ import { toast } from "./ui.js";
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 
 /**
- * iOS plays through a plain <audio> element straight from the CDN — no Web Audio, no proxy.
- * The YMProbe test showed iOS keeps such an element playing (and our JS running) with the
- * screen locked, but puts an AudioContext into "interrupted" the moment the app goes to the
- * background. iOS also ignores element.volume. So on iPhone there's no EQ, analyser, crossfade
- * or loudness normalization; everything else works the same.
+ * iOS can't play a music app's audio in the webview: it interrupts Web Audio as soon as the app
+ * is backgrounded and ignores <audio>.volume. So there playback runs natively on AVAudioEngine
+ * (the `ymaudio` plugin, src-tauri/plugins/ymaudio) behind `NativeDeck`, a small stand-in for
+ * HTMLAudioElement — the rest of this file drives both kinds of deck the same way.
+ * iOS also freezes the webview's JS ~30 s into the background, so on iOS *native* decides what
+ * plays next: we hand it the upcoming tracks (`syncNativeQueue`) and follow its `advanced` events.
  */
 export const IOS =
   /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-export const WEB_AUDIO = !IOS;
+export const NATIVE = IOS;
+export const WEB_AUDIO = !NATIVE;
+
+const native = (cmd, args = {}) => invoke(`plugin:ymaudio|${cmd}`, args);
+
+/** Taptic feedback on iOS (light | medium | rigid | selection | success); no-op elsewhere. */
+export const haptic = (style = "light") => {
+  if (NATIVE) native("haptic", { style }).catch(() => {});
+};
+let nativeToken = 0;
+
+/** HTMLAudioElement-shaped proxy for one native deck (only what this file uses). */
+class NativeDeck extends EventTarget {
+  constructor(index) {
+    super();
+    this.index = index;
+    this._src = "";
+    this._key = "";
+    this._token = 0;
+    this._paused = true;
+    this._ended = false;
+    this._pos = 0;
+    this._dur = NaN;
+    this._ready = Promise.resolve();
+    this.error = null;
+    this.preload = "auto";
+    this.volume = 1; // iOS: hardware volume buttons
+  }
+  _emit(type) {
+    this.dispatchEvent(new Event(type));
+  }
+  get src() {
+    return this._src;
+  }
+  set src(url) {
+    const token = (this._token = ++nativeToken);
+    Object.assign(this, { _src: url, _paused: true, _ended: false, _pos: 0, _dur: NaN, error: null });
+    this._ready = native("load", { deck: this.index, token, key: this._key || url, url }).then(
+      (r) => {
+        if (token !== this._token) return;
+        this._dur = r?.duration || NaN;
+        this._emit("loadedmetadata");
+      },
+      (e) => {
+        if (token === this._token) (this.error = { code: 4, message: String(e) }), this._emit("error");
+        throw new Error(String(e));
+      },
+    );
+  }
+  /** Native already started this deck on its own (queued advance): just follow it. */
+  adopt(token, url) {
+    Object.assign(this, { _token: token, _src: url || "native", _paused: false, _ended: false, _pos: 0, _dur: NaN, error: null });
+    this._ready = Promise.resolve();
+  }
+  removeAttribute(name) {
+    if (name !== "src") return;
+    this._src = "";
+    this._token = ++nativeToken;
+    native("stop", { deck: this.index }).catch(() => {});
+  }
+  load() {}
+  async play() {
+    await this._ready;
+    await native("play", { deck: this.index });
+    this._paused = false;
+    this._ended = false;
+    this._emit("play");
+    this._emit("playing");
+  }
+  pause() {
+    if (this._paused) return;
+    this._paused = true;
+    native("pause", { deck: this.index }).catch(() => {});
+    this._emit("pause");
+  }
+  get paused() {
+    return this._paused;
+  }
+  get ended() {
+    return this._ended;
+  }
+  get duration() {
+    return this._dur;
+  }
+  get currentTime() {
+    return this._pos;
+  }
+  set currentTime(v) {
+    this._pos = v;
+    this._ended = false;
+    native("seek", { deck: this.index, position: v }).then(() => this._emit("seeked"), () => {});
+  }
+}
 
 /** Desktop audio goes through the Rust `ymstream:` proxy so CORS never depends on the page
  *  origin (macOS serves the page from tauri://localhost, which the CDN doesn't allow). */
 const streamSrc = (url) => (WEB_AUDIO ? convertFileSrc(url, "ymstream") : url);
 
-const makeDeck = () => {
+const makeDeck = (i) => {
+  if (NATIVE) return { el: new NativeDeck(i), gain: null };
   const el = new Audio();
-  if (WEB_AUDIO) el.crossOrigin = "anonymous"; // needed for the analyser; the ymstream proxy answers with ACAO:*
+  el.crossOrigin = "anonymous"; // needed for the analyser; the ymstream proxy answers with ACAO:*
   el.preload = "auto";
   return { el, gain: null };
 };
-const decks = [makeDeck(), makeDeck()];
+const decks = [makeDeck(0), makeDeck(1)];
 let audio = decks[0].el;
 const deckOf = (el) => decks.find((d) => d.el === el);
 const otherDeck = () => decks.find((d) => d.el !== audio);
@@ -76,7 +170,9 @@ function ensureGraph() {
 }
 
 /** Current frequency bins (0..255) or null if nothing has played yet. */
+const nativeBins = new Uint8Array(256);
 export function spectrum() {
+  if (NATIVE) return state.playing ? nativeBins : null;
   if (!analyser) return null;
   analyser.getByteFrequencyData(bins);
   return bins;
@@ -84,6 +180,10 @@ export function spectrum() {
 
 /** Set (or ramp over `secs`) a deck's gain. */
 function setDeckGain(deck, value, secs = 0) {
+  if (NATIVE) {
+    if (deck) native("gain", { deck: decks.indexOf(deck), value, seconds: secs }).catch(() => {});
+    return;
+  }
   if (!actx || !deck?.gain) return;
   const g = deck.gain.gain, now = actx.currentTime;
   g.cancelScheduledValues(now);
@@ -94,7 +194,10 @@ function setDeckGain(deck, value, secs = 0) {
 // ---------- state & events ----------
 const listeners = new Set();
 export const on = (fn) => (listeners.add(fn), () => listeners.delete(fn));
-const emit = (what) => listeners.forEach((fn) => fn(what));
+const emit = (what) => {
+  listeners.forEach((fn) => fn(what));
+  if (what === "queue" || what === "settings" || what === "sleep") scheduleNativeSync();
+};
 
 const store = (k, d) => {
   try {
@@ -180,6 +283,10 @@ export const eq = {
 };
 
 function applyEq(instant = false) {
+  if (NATIVE) {
+    native("set_eq", { enabled: eq.enabled, gains: eq.gains, preamp: eq.preamp }).catch(() => {});
+    return;
+  }
   if (!actx) return;
   const t = actx.currentTime;
   const set = (param, v) => (instant ? (param.value = v) : param.setTargetAtTime(v, t, 0.03));
@@ -309,11 +416,113 @@ function prefetch(t) {
 
 /** Index of what plays after the current track on its own, or null. */
 function nextIndex() {
-  const i = state.index + 1;
+  return nextIndexFrom(state.index);
+}
+function nextIndexFrom(from) {
+  const i = from + 1;
   if (state.mode === "wave") return i < state.queue.length ? i : null;
   if (state.repeat === "one") return null;
   if (i < state.queue.length) return i;
   return state.repeat === "all" && state.queue.length ? 0 : null;
+}
+
+// ---------- iOS: native owns "what's next" (see the NATIVE note at the top) ----------
+const nativeItems = new Map(); // queued token -> track
+const nativeUrls = new Map(); // track id -> { promise, at }
+let nativeSyncTimer = null;
+let nativeSyncSeq = 0;
+
+function nativeUrl(t) {
+  const id = String(t.id);
+  const hit = nativeUrls.get(id);
+  if (hit && Date.now() - hit.at < PREFETCH_TTL * 2) return hit.promise;
+  const promise = api.trackUrl(t.id);
+  promise.catch(() => nativeUrls.get(id)?.promise === promise && nativeUrls.delete(id));
+  nativeUrls.set(id, { promise, at: Date.now() });
+  return promise;
+}
+
+/** Where (s) in `t` the transition to the next track should begin, for native's crossfade. */
+function fadeAtFor(t) {
+  const dur = (t?.durationMs || 0) / 1000;
+  if (!state.crossfade || !dur) return null;
+  let start = dur - state.crossfade;
+  const out = t.fade?.outStart;
+  if (typeof out === "number" && out < start && out > start - 5) start = out;
+  return Math.max(start, dur * 0.5);
+}
+
+function scheduleNativeSync() {
+  if (!NATIVE) return;
+  clearTimeout(nativeSyncTimer);
+  nativeSyncTimer = setTimeout(syncNativeQueue, 60);
+}
+
+/** Hand native the next 3 tracks (URLs, gain, crossfade point, Now Playing info). */
+async function syncNativeQueue() {
+  const cur = state.track;
+  if (!NATIVE || !cur) return;
+  const seq = ++nativeSyncSeq;
+  const upcoming = [];
+  if (sleep.mode !== "track") {
+    let i = state.index;
+    for (let k = 0; k < 6 && upcoming.length < 3; k++) {
+      i = nextIndexFrom(i);
+      if (i == null || i === state.index) break;
+      if (state.queue[i]?.available !== false) upcoming.push(state.queue[i]);
+    }
+  }
+  const items = [];
+  for (const t of upcoming) {
+    let url;
+    try {
+      ({ url } = await nativeUrl(t));
+    } catch {
+      break;
+    }
+    if (seq !== nativeSyncSeq) return;
+    const token = ++nativeToken;
+    nativeItems.set(token, t);
+    items.push({
+      token,
+      key: String(t.id),
+      url,
+      gain: normGain(t),
+      fadeAt: fadeAtFor(t),
+      title: t.title + (t.version ? ` (${t.version})` : ""),
+      artist: api.artistsOf(t) || "",
+      album: t.albums?.[0]?.title || null,
+      artwork: api.cover(t, 600) || null,
+      duration: t.durationMs ? t.durationMs / 1000 : null,
+    });
+  }
+  if (seq !== nativeSyncSeq) return;
+  native("set_queue", { items, crossfade: state.crossfade, currentFadeAt: fadeAtFor(cur) }).catch(() => {});
+}
+
+/** Native moved on by itself (crossfade point, track end, lock-screen "next"): follow it. */
+function onNativeAdvanced({ deck, token, key }) {
+  const d = decks[deck]?.el;
+  if (!d) return;
+  const queued = nativeItems.get(token);
+  let i = state.queue.findIndex((x, k) => k > state.index && String(x.id) === String(key));
+  if (i < 0) i = state.queue.findIndex((x) => String(x.id) === String(key));
+  waveTrackEnded(true);
+  const old = audio;
+  d.adopt(token);
+  if (old !== d) old._paused = true; // native fades it out and stops it
+  audio = d;
+  if (i >= 0) state.index = i;
+  else if (queued) state.queue.splice(++state.index, 0, queued);
+  loadSeq++; // supersede any JS-side load still in flight
+  failStreak = 0;
+  state.loading = false;
+  emit("track");
+  emit("state");
+  updateMediaSession();
+  waveTrackStarted(state.track);
+  pushRpc();
+  scheduleNativeSync();
 }
 
 // ---------- crossfade ----------
@@ -345,6 +554,7 @@ function fadePlan(t) {
 }
 
 function maybeCrossfade() {
+  if (NATIVE) return; // native crossfades on its own (setQueue)
   if (fade || fadeStarting || !actx || state.loading || audio.paused || sleep.mode === "track") return;
   const plan = fadePlan(state.track);
   const ni = nextIndex();
@@ -408,6 +618,7 @@ async function load(i, autoplay = true) {
     if (t.available === false) throw new Error("Трек недоступен");
     const { url, preview } = await urlFor(t);
     if (seq !== loadSeq) return;
+    audio._key = String(t.id); // native download cache key
     audio.src = streamSrc(url);
     setDeckGain(deckOf(audio), normGain(t));
     if (autoplay) {
@@ -417,6 +628,7 @@ async function load(i, autoplay = true) {
     failStreak = 0;
     if (preview) toast("Доступно только 30‑секундное превью — нужна подписка Плюс");
     waveTrackStarted(t);
+    scheduleNativeSync();
   } catch (e) {
     if (seq !== loadSeq || e?.name === "AbortError") return;
     audio.pause(); // a media error leaves `paused` false, which would show a stuck "pause" button
@@ -578,6 +790,7 @@ export function toggleShuffle() {
 
 export function cycleRepeat() {
   state.repeat = { off: "all", all: "one", one: "off" }[state.repeat];
+  scheduleNativeSync();
   emit("state");
 }
 
@@ -609,7 +822,9 @@ export function setSleep(mode, minutes = 0) {
   clearTimeout(sleepTimer);
   sleep.mode = mode;
   sleep.until = mode === "time" ? Date.now() + minutes * 60000 : 0;
-  if (mode === "time") sleepTimer = setTimeout(sleepNow, minutes * 60000);
+  // iOS: the timer runs natively; JS is frozen while the screen is locked.
+  if (NATIVE) native("sleep", { seconds: mode === "time" ? minutes * 60 : 0 }).catch(() => {});
+  else if (mode === "time") sleepTimer = setTimeout(sleepNow, minutes * 60000);
   emit("sleep");
 }
 
@@ -656,9 +871,19 @@ onDeck("error", () => {
 });
 
 // ---------- Media Session (media keys, Windows overlay) ----------
-const ms = navigator.mediaSession;
+const ms = NATIVE ? null : navigator.mediaSession; // iOS: native Now Playing + remote commands
 function updateMediaSession() {
   const t = state.track;
+  if (NATIVE && t) {
+    native("now_playing", {
+      title: t.title + (t.version ? ` (${t.version})` : ""),
+      artist: api.artistsOf(t) || "",
+      album: t.albums?.[0]?.title || null,
+      artwork: api.cover(t, 600) || null,
+      duration: t.durationMs ? t.durationMs / 1000 : null,
+    }).catch(() => {});
+    return;
+  }
   if (!ms || !t) return;
   ms.metadata = new MediaMetadata({
     title: t.title,
@@ -704,4 +929,45 @@ function pushRpc() {
       end: dur ? Math.round(now - pos + dur) : null,
     },
   }).catch(() => {});
+}
+
+// ---------- iOS native engine events ----------
+if (NATIVE) {
+  const { addPluginListener } = window.__TAURI__.core;
+  const listen = (event, fn) => addPluginListener("ymaudio", event, fn).catch((e) => console.error("ymaudio", event, e));
+  const deckFor = (s) => {
+    const d = decks[s.deck]?.el;
+    return d && s.token === d._token ? d : null;
+  };
+  listen("state", (s) => {
+    const d = deckFor(s);
+    if (!d) return;
+    d._pos = s.position;
+    if (s.duration) d._dur = s.duration;
+    // Native is the source of truth for play/pause (lock screen, calls, unplugged headphones).
+    if (s.playing === d._paused) {
+      d._paused = !s.playing;
+      d._emit(s.playing ? "play" : "pause");
+    }
+    d._emit("timeupdate");
+  });
+  listen("ended", (s) => {
+    const d = deckFor(s);
+    if (!d) return;
+    d._ended = true;
+    d._paused = true;
+    d._emit("pause");
+    d._emit("ended");
+  });
+  listen("advanced", onNativeAdvanced);
+  listen("remote", ({ command }) => {
+    if (command === "next") next();
+    else if (command === "prev") prev();
+    else if (command === "slept") {
+      setSleep(null);
+      toast("Таймер сна: музыка остановлена");
+    }
+  });
+  listen("spectrum", ({ bins }) => nativeBins.set(bins.slice(0, 256)));
+  applyEq();
 }

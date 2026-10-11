@@ -12,6 +12,7 @@
     "core:window:allow-is-fullscreen",
     "core:window:allow-start-dragging",
     "core:window:allow-internal-toggle-maximize",
-    "opener:default"
+    "opener:default",
+    "ymaudio:default"
   ]
 }

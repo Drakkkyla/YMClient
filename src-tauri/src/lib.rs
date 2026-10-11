@@ -165,6 +165,7 @@ fn mobile_navigation(app: &AppHandle, url: &Url) -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_ymaudio::init())
         .register_asynchronous_uri_scheme_protocol("ymstream", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             tauri::async_runtime::spawn(async move {

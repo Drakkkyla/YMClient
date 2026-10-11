@@ -1,0 +1,20 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Everything YMClient's player needs from the native audio engine."
+permissions = [
+  "allow-load",
+  "allow-preload",
+  "allow-play",
+  "allow-pause",
+  "allow-seek",
+  "allow-stop",
+  "allow-gain",
+  "allow-set-eq",
+  "allow-now-playing",
+  "allow-set-queue",
+  "allow-sleep",
+  "allow-haptic",
+  "allow-register-listener",
+  "allow-remove-listener",
+]
