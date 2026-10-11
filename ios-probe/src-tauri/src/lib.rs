@@ -17,14 +17,24 @@ pub struct Http {
     raw: reqwest::Client,
 }
 
+/// GET with retries on 429: anonymous requests hit Yandex's concurrency limit often, and a
+/// failed lookup at the moment a track ends would stop playback and spoil the test.
 async fn get_json(http: &Http, url: &str) -> Result<Value, String> {
-    let resp = http
-        .client
-        .get(url)
-        .header("X-Yandex-Music-Client", CLIENT_HEADER)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut attempt = 0u64;
+    let resp = loop {
+        let resp = http
+            .client
+            .get(url)
+            .header("X-Yandex-Music-Client", CLIENT_HEADER)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if resp.status() != reqwest::StatusCode::TOO_MANY_REQUESTS || attempt >= 5 {
+            break resp;
+        }
+        attempt += 1;
+        tokio::time::sleep(std::time::Duration::from_millis(800 * attempt)).await;
+    };
     let status = resp.status();
     let text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {

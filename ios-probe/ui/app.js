@@ -38,13 +38,32 @@ function ensureGraph() {
   actx.createMediaElementSource(wa).connect(analyser);
   analyser.connect(actx.destination);
   bins = new Uint8Array(analyser.frequencyBinCount);
-  actx.addEventListener("statechange", () => log(`AudioContext → ${actx.state}`));
+  actx.addEventListener("statechange", () => {
+    log(`AudioContext → ${actx.state}`);
+    // Does iOS let us resume Web Audio while in the background? The answer decides whether
+    // YMClient's EQ/crossfade path can work on iPhone or needs a native player.
+    if (actx.state === "interrupted" || (actx.state === "suspended" && mode === "webaudio" && !wa.paused)) {
+      setTimeout(() => {
+        actx.resume().then(
+          () => log(`resume() → ${actx.state} (видимость: ${document.visibilityState})`),
+          (e) => log(`resume() отклонён: ${e?.message || e}`),
+        );
+      }, 500);
+    }
+  });
   log(`AudioContext создан (${actx.state}, ${actx.sampleRate} Гц)`);
 }
 
 let mode = null;
 let tracks = [];
 let index = -1;
+const urls = new Map(); // track id -> signed URL, fetched ahead so a background transition needs no request
+
+function urlFor(t) {
+  const id = String(t.id);
+  if (!urls.has(id)) urls.set(id, invoke("track_url", { id }).catch((e) => (urls.delete(id), Promise.reject(e))));
+  return urls.get(id);
+}
 const el = () => (mode === "webaudio" ? wa : simple);
 
 for (const [name, a] of [["simple", simple], ["webaudio", wa]]) {
@@ -69,13 +88,15 @@ async function play(i) {
   $("#artists").textContent = t.artists;
   $("#cover").src = t.cover;
   try {
-    const url = await invoke("track_url", { id: String(t.id) });
+    const url = await urlFor(t);
     const a = el();
     a.src = mode === "webaudio" ? convertFileSrc(url, "ymstream") : url;
     if (mode === "webaudio") ensureGraph();
     await a.play();
     log(`♪ ${index + 1}/${tracks.length} «${t.title}» [${mode}] (видимость: ${document.visibilityState})`);
     setSession(t);
+    const next = tracks[(index + 1) % tracks.length];
+    urlFor(next).then(() => log(`↓ ссылка на следующий трек получена заранее`), (e) => log(`✖ предзагрузка: ${e}`));
   } catch (e) {
     log(`✖ не удалось включить «${t.title}»: ${e?.message || e}`);
   }
