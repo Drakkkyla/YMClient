@@ -1,0 +1,57 @@
+# Bitrise CI — same two builds as codemagic.yaml.
+#   ios-probe → unsigned YMProbe.ipa (sideload with Sideloadly)
+#   macos     → universal YMClient .dmg
+# Results appear on the build page under "Artifacts".
+# The macOS stack/machine is picked in the Workflow Editor ("Stacks & Machines").
+format_version: "13"
+default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
+project_type: other
+
+workflows:
+  ios-probe:
+    steps:
+      - git-clone@8: {}
+      - script@1:
+          title: Install Rust
+          inputs:
+            - content: |-
+                set -euo pipefail
+                if ! command -v rustup >/dev/null 2>&1; then
+                  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+                fi
+                # envman carries PATH over to the following steps.
+                envman add --key PATH --value "$HOME/.cargo/bin:$PATH"
+                "$HOME/.cargo/bin/rustup" target add aarch64-apple-ios
+      - script@1:
+          title: Build unsigned YMProbe.ipa
+          inputs:
+            - content: |-
+                set -euo pipefail
+                cd ios-probe
+                npm ci
+                bash scripts/build-unsigned-ipa.sh
+                cp YMProbe.ipa "$BITRISE_DEPLOY_DIR/"
+      - deploy-to-bitrise-io@2: {}
+
+  macos:
+    steps:
+      - git-clone@8: {}
+      - script@1:
+          title: Install Rust
+          inputs:
+            - content: |-
+                set -euo pipefail
+                if ! command -v rustup >/dev/null 2>&1; then
+                  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+                fi
+                envman add --key PATH --value "$HOME/.cargo/bin:$PATH"
+                "$HOME/.cargo/bin/rustup" target add aarch64-apple-darwin x86_64-apple-darwin
+      - script@1:
+          title: Build universal .dmg
+          inputs:
+            - content: |-
+                set -euo pipefail
+                npm ci
+                npm run tauri build -- --target universal-apple-darwin
+                cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg "$BITRISE_DEPLOY_DIR/"
+      - deploy-to-bitrise-io@2: {}
