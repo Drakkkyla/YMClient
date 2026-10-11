@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YMClient</title>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient" aria-hidden="true"></div>
+
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="brand" data-tauri-drag-region>
+        <svg viewBox="0 0 24 24" class="brand-mark" aria-hidden="true"><path d="M3 13c1.6 0 2.1-4 3.8-4s2 6.6 3.6 6.6S12.5 9.8 14 9.8s1.7 2.4 2.7 2.4" /></svg>
+        <span data-tauri-drag-region>YMClient</span>
+      </div>
+      <div class="win-controls">
+        <button class="win-btn" data-win="min" aria-label="Свернуть"><i class="ph ph-minus"></i></button>
+        <button class="win-btn" data-win="max" aria-label="Развернуть"><i class="ph ph-square"></i></button>
+        <button class="win-btn win-close" data-win="close" aria-label="Закрыть"><i class="ph ph-x"></i></button>
+      </div>
+    </header>
+
+    <nav class="sidebar">
+      <div class="nav-group">
+        <button class="nav-item" data-go="wave"><i class="ph ph-waveform"></i><span>Моя волна</span></button>
+        <button class="nav-item" data-go="search"><i class="ph ph-magnifying-glass"></i><span>Поиск</span></button>
+      </div>
+      <div class="nav-label">Медиатека</div>
+      <div class="nav-group">
+        <button class="nav-item" data-go="liked"><i class="ph ph-heart"></i><span>Мне нравится</span></button>
+        <button class="nav-item" data-go="library" data-tab="playlists"><i class="ph ph-playlist"></i><span>Плейлисты</span></button>
+        <button class="nav-item" data-go="library" data-tab="albums"><i class="ph ph-vinyl-record"></i><span>Альбомы</span></button>
+        <button class="nav-item" data-go="library" data-tab="artists"><i class="ph ph-microphone-stage"></i><span>Исполнители</span></button>
+      </div>
+      <div class="nav-playlists" id="navPlaylists"></div>
+      <button class="account" id="account" data-action="settings">
+        <span class="avatar" id="avatar">?</span>
+        <span class="account-text">
+          <span class="account-name" id="accountName">—</span>
+          <span class="account-sub" id="accountSub"></span>
+        </span>
+        <i class="ph ph-gear-six"></i>
+      </button>
+    </nav>
+
+    <main class="main" id="main">
+      <div class="view" id="view"></div>
+    </main>
+
+    <aside class="queue-panel history-panel" id="historyPanel" aria-label="История волны">
+      <div class="queue-head">
+        <h3>История волны</h3>
+        <button class="icon-btn" data-action="history" aria-label="Закрыть"><i class="ph ph-x"></i></button>
+      </div>
+      <div class="queue-from">Что уже сыграло за этот запуск</div>
+      <div class="queue-list" id="historyList"></div>
+    </aside>
+
+    <aside class="queue-panel" id="queuePanel" aria-label="Очередь">
+      <div class="queue-head">
+        <h3>Очередь</h3>
+        <button class="icon-btn" data-action="queue" aria-label="Закрыть"><i class="ph ph-x"></i></button>
+      </div>
+      <div class="queue-from" id="queueFrom"></div>
+      <div class="queue-list" id="queueList"></div>
+    </aside>
+
+    <aside class="eq-panel" id="eqPanel" aria-label="Эквалайзер"></aside>
+
+    <footer class="player" id="player">
+      <div class="np">
+        <div class="np-cover-wrap"><img class="np-cover" id="npCover" alt="" /></div>
+        <div class="np-text">
+          <div class="np-title" id="npTitle">Ничего не играет</div>
+          <div class="np-artists" id="npArtists">Запустите Мою волну</div>
+        </div>
+        <button class="icon-btn np-like" id="npLike" data-action="like-current" aria-label="Нравится"><i class="ph ph-heart"></i></button>
+        <button class="icon-btn np-add" id="npAdd" data-action="add-current" aria-label="Добавить в плейлист"><i class="ph ph-plus-circle"></i></button>
+        <button class="icon-btn np-dislike" id="npDislike" data-action="dislike" aria-label="Не нравится"><i class="ph ph-heart-break"></i></button>
+      </div>
+
+      <div class="transport">
+        <div class="controls">
+          <button class="icon-btn ctl-sm" id="btnShuffle" data-action="shuffle" aria-label="Перемешать"><i class="ph ph-shuffle"></i></button>
+          <button class="icon-btn ctl" data-action="prev" aria-label="Назад"><i class="ph-fill ph-skip-back"></i></button>
+          <button class="play-btn" id="btnPlay" data-action="toggle" aria-label="Играть"><i class="ph-fill ph-play"></i></button>
+          <button class="icon-btn ctl" data-action="next" aria-label="Вперёд"><i class="ph-fill ph-skip-forward"></i></button>
+          <button class="icon-btn ctl-sm" id="btnRepeat" data-action="repeat" aria-label="Повтор"><i class="ph ph-repeat"></i></button>
+        </div>
+        <div class="progress-row">
+          <span class="time" id="tCur">0:00</span>
+          <div class="slider progress" id="progress"><div class="slider-track"><div class="slider-fill"></div></div><div class="slider-thumb"></div></div>
+          <span class="time" id="tDur">0:00</span>
+        </div>
+      </div>
+
+      <div class="extras">
+        <button class="icon-btn sleep-btn" id="btnSleep" data-action="sleep" aria-label="Таймер сна"><i class="ph ph-moon"></i><span id="sleepLeft"></span></button>
+        <button class="icon-btn" id="btnEq" data-action="eq" aria-label="Эквалайзер"><i class="ph ph-sliders-horizontal"></i></button>
+        <button class="icon-btn" id="btnQueue" data-action="queue" aria-label="Очередь"><i class="ph ph-queue"></i></button>
+        <button class="icon-btn" id="btnMute" data-action="mute" aria-label="Звук"><i class="ph ph-speaker-high"></i></button>
+        <div class="slider volume" id="volume"><div class="slider-track"><div class="slider-fill"></div></div><div class="slider-thumb"></div></div>
+      </div>
+    </footer>
+
+    <section class="fs" id="fs" aria-label="Сейчас играет" hidden>
+      <div class="fs-bg" aria-hidden="true">
+        <img class="fs-bg-cover" id="fsBgCover" alt="" />
+        <video class="fs-bg-video" id="fsVideo" muted loop playsinline preload="auto"></video>
+        <div class="fs-shade"></div>
+      </div>
+      <header class="fs-top">
+        <button class="fs-icon" data-action="fs-close" aria-label="Свернуть"><i class="ph ph-caret-down"></i></button>
+        <div class="fs-from" id="fsFrom"></div>
+        <div class="fs-top-right">
+          <button class="fs-chip" data-action="fs-clip" aria-label="Показать клип"><i class="ph ph-film-strip"></i><span>Клип</span></button>
+          <button class="fs-icon" id="fsOsBtn" data-action="fs-os" aria-label="Во весь экран"><i class="ph ph-arrows-out"></i></button>
+        </div>
+      </header>
+      <div class="fs-main">
+        <div class="fs-cover-wrap"><img class="fs-cover" id="fsCover" alt="" /></div>
+        <div class="fs-info">
+          <h1 class="fs-title" id="fsTitle"></h1>
+          <div class="fs-artists" id="fsArtists"></div>
+          <div class="fs-album" id="fsAlbum"></div>
+          <div class="fs-progress">
+            <div class="slider" id="fsProgress"><div class="slider-track"><div class="slider-fill"></div></div><div class="slider-thumb"></div></div>
+            <div class="fs-times"><span id="fsCur">0:00</span><span id="fsDur">0:00</span></div>
+          </div>
+          <div class="fs-controls">
+            <button class="icon-btn ctl-sm" id="fsShuffle" data-action="shuffle" aria-label="Перемешать"><i class="ph ph-shuffle"></i></button>
+            <button class="fs-skip" data-action="prev" aria-label="Назад"><i class="ph-fill ph-skip-back"></i></button>
+            <button class="fs-play" id="fsPlay" data-action="toggle" aria-label="Играть"><i class="ph-fill ph-play"></i></button>
+            <button class="fs-skip" data-action="next" aria-label="Вперёд"><i class="ph-fill ph-skip-forward"></i></button>
+            <button class="icon-btn ctl-sm" id="fsRepeat" data-action="repeat" aria-label="Повтор"><i class="ph ph-repeat"></i></button>
+          </div>
+          <div class="fs-actions">
+            <button class="icon-btn" id="fsLike" data-action="like-current" aria-label="Нравится"><i class="ph ph-heart"></i></button>
+            <button class="icon-btn" data-action="add-current" aria-label="Добавить в плейлист"><i class="ph ph-plus-circle"></i></button>
+            <button class="icon-btn fs-dislike" data-action="dislike" aria-label="Не нравится"><i class="ph ph-heart-break"></i></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="login" id="login" hidden>
+      <div class="login-card">
+        <svg viewBox="0 0 24 24" class="login-mark" aria-hidden="true"><path d="M3 13c1.6 0 2.1-4 3.8-4s2 6.6 3.6 6.6S12.5 9.8 14 9.8s1.7 2.4 2.7 2.4" /></svg>
+        <h1>YMClient</h1>
+        <p>Альтернативный клиент Яндекс&nbsp;Музыки. Войдите в свой аккаунт&nbsp;Яндекса — слушать можно по вашей подписке Плюс.</p>
+        <button class="btn btn-accent btn-lg" data-action="login"><i class="ph-bold ph-sign-in"></i>Войти через Яндекс</button>
+        <details class="token-login">
+          <summary>Войти по OAuth‑токену</summary>
+          <form id="tokenForm">
+            <input type="password" id="tokenInput" placeholder="y0_AgAAAA…" autocomplete="off" spellcheck="false" />
+            <button class="btn btn-ghost" type="submit">Войти</button>
+          </form>
+        </details>
+        <p class="login-note">Токен хранится только на этом компьютере.</p>
+      </div>
+    </div>
+
+    <div class="toasts" id="toasts"></div>
+  </body>
+</html>
