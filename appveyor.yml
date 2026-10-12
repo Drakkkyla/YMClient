@@ -1,0 +1,12 @@
+# AppVeyor: builds the unsigned YMClient.ipa (iPhone, sideload with Sideloadly) on a Mac.
+# Free for public repositories. The .ipa appears under the build's "Artifacts" tab.
+version: "{build}"
+image: macos-sonoma
+branches:
+  only:
+    - main
+build_script:
+  - sh: bash scripts/appveyor-ios.sh
+artifacts:
+  - path: YMClient.ipa
+    name: YMClient
