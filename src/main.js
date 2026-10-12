@@ -444,7 +444,9 @@ const playerEl = $("#player");
 function updatePlayer() {
   const { track: t, playing, loading, mode, shuffle, repeat } = player.state;
   playerEl.classList.toggle("wave", mode === "wave");
-  playerEl.classList.toggle("empty", !t); // phone: the floating mini player appears with the first track
+  // phone: the floating mini player appears with the first track. ("idle", not "empty": .empty is
+  // the empty-state block and its `.empty i { font-size: 44px }` would blow up every player icon)
+  playerEl.classList.toggle("idle", !t);
   $("#npTitle").textContent = t ? t.title + (t.version ? ` (${t.version})` : "") : "Ничего не играет";
   $("#npArtists").innerHTML = t ? views.artistLinks(t) : "Запустите Мою волну";
   const cov = t ? api.cover(t, 200) : "";
