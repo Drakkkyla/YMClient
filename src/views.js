@@ -345,7 +345,10 @@ async function runSearch(q, box, alive) {
 // ---------- Мне нравится ----------
 export async function liked(root, _params, alive) {
   const tracks = [];
-  const listId = registerList(tracks, { label: "Мне нравится", route: { name: "liked" } });
+  let markReady;
+  const ready = new Promise((r) => (markReady = r));
+  const listId = registerList(tracks, { label: "Мне нравится", route: { name: "liked" } }, { ready });
+  const listInfo = lists.get(listId);
   root.innerHTML = `
     ${heroBlock({
       art: "",
@@ -365,19 +368,40 @@ export async function liked(root, _params, alive) {
     root.querySelector("#likedMeta").textContent = plural(refs.length, "трек", "трека", "треков");
     list.innerHTML = refs.length ? "" : empty("ph-heart", "Здесь появятся треки, которые вам понравятся");
     const ids = refs.map((r) => (r.albumId ? `${r.id}:${r.albumId}` : r.id));
-    // Progressive load: first page fast, the rest in the background.
-    for (let i = 0; i < ids.length; i += 150) {
-      more.innerHTML = '<div class="spinner"></div>';
-      const page = await api.getTracks(ids.slice(i, i + 150));
-      if (!alive()) return;
-      const offset = tracks.length;
-      tracks.push(...page);
-      list.insertAdjacentHTML("beforeend", trackRows(page, listId, offset));
-    }
+    // Pages of 150 fetched 4 at a time but appended strictly in order: big libraries load
+    // several times faster than one page after another, and the list never reorders.
+    const PAGE = 150;
+    const pages = [];
+    for (let i = 0; i < ids.length; i += PAGE) pages.push(ids.slice(i, i + PAGE));
+    const fetched = pages.map(() => null);
+    let nextToFetch = 0;
+    let nextToShow = 0;
+    if (pages.length) more.innerHTML = '<div class="spinner"></div>';
+    const flush = () => {
+      while (nextToShow < pages.length && fetched[nextToShow]) {
+        const page = fetched[nextToShow++];
+        const offset = tracks.length;
+        tracks.push(...page);
+        list.insertAdjacentHTML("beforeend", trackRows(page, listId, offset));
+      }
+    };
+    const worker = async () => {
+      while (nextToFetch < pages.length) {
+        const i = nextToFetch++;
+        fetched[i] = await api.getTracks(pages[i]);
+        if (!alive()) return;
+        flush();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, pages.length) }, worker));
+    if (!alive()) return;
+    listInfo.done = true;
+    markReady();
     more.innerHTML = "";
     root.querySelector("#likedMeta").textContent =
       `${plural(tracks.length, "трек", "трека", "треков")} · ${fmtTotal(tracks.reduce((s, t) => s + (t.durationMs || 0), 0))}`;
   } catch (e) {
+    markReady();
     if (alive()) (list.innerHTML = errorBox(e)), (more.innerHTML = "");
   }
 }

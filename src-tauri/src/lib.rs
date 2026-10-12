@@ -161,9 +161,80 @@ fn mobile_navigation(app: &AppHandle, url: &Url) -> bool {
     false
 }
 
+// ---------- desktop: tray ----------
+
+#[cfg(desktop)]
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// Tray icon: left click shows the window; the menu drives playback through JS ("tray" event).
+#[cfg(desktop)]
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let item = |id: &str, text: &str| MenuItem::with_id(app, id, text, true, None::<&str>);
+    let menu = Menu::with_items(
+        app,
+        &[
+            &item("toggle", "Играть / пауза")?,
+            &item("next", "Следующий трек")?,
+            &item("prev", "Предыдущий трек")?,
+            &PredefinedMenuItem::separator(app)?,
+            &item("show", "Показать YMClient")?,
+            &item("quit", "Выйти")?,
+        ],
+    )?;
+    let mut tray = TrayIconBuilder::with_id("main")
+        .tooltip("YMClient")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "quit" => app.exit(0),
+            "show" => show_main(app),
+            other => {
+                let _ = app.emit("tray", other.to_string());
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                show_main(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
+/// Tray tooltip = what's playing.
+#[tauri::command]
+fn tray_tooltip(app: AppHandle, text: String) {
+    #[cfg(desktop)]
+    if let Some(tray) = app.tray_by_id("main") {
+        let text: String = text.chars().take(120).collect();
+        let _ = tray.set_tooltip(Some(if text.is_empty() { "YMClient".to_string() } else { text }));
+    }
+    #[cfg(mobile)]
+    let _ = (app, text);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Desktop: one instance only (a second launch focuses the running window) and the window
+    // remembers its size/position between launches.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        .plugin(tauri_plugin_window_state::Builder::default().build());
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_ymaudio::init())
         .register_asynchronous_uri_scheme_protocol("ymstream", |ctx, request, responder| {
@@ -176,6 +247,8 @@ pub fn run() {
             let token = load_token(app.handle());
             app.manage(Api::new(token));
             app.manage(rpc::spawn());
+            #[cfg(desktop)]
+            build_tray(app)?;
             // On iOS the window is created here (tauri.ios.conf.json declares none) so it can carry
             // the login navigation handler; on desktop it comes from tauri.conf.json.
             #[cfg(mobile)]
@@ -197,6 +270,8 @@ pub fn run() {
             api::ym,
             api::track_url,
             api::avatar_url,
+            api::lyrics,
+            tray_tooltip,
             rpc::rpc_update,
             rpc::rpc_clear,
         ])

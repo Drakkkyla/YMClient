@@ -123,12 +123,14 @@
         <button class="fs-icon" data-action="fs-close" aria-label="Свернуть"><i class="ph ph-caret-down"></i></button>
         <div class="fs-from" id="fsFrom"></div>
         <div class="fs-top-right">
+          <button class="fs-chip fs-lyrics-btn" id="fsLyricsBtn" data-action="fs-lyrics" aria-label="Текст песни"><i class="ph ph-quotes"></i><span>Текст</span></button>
           <button class="fs-chip" data-action="fs-clip" aria-label="Показать клип"><i class="ph ph-film-strip"></i><span>Клип</span></button>
           <button class="fs-icon" id="fsOsBtn" data-action="fs-os" aria-label="Во весь экран"><i class="ph ph-arrows-out"></i></button>
         </div>
       </header>
       <div class="fs-main">
         <div class="fs-cover-wrap"><img class="fs-cover" id="fsCover" alt="" /></div>
+        <div class="fs-lyrics" id="fsLyrics" aria-live="off"></div>
         <div class="fs-info">
           <h1 class="fs-title" id="fsTitle"></h1>
           <div class="fs-artists" id="fsArtists"></div>

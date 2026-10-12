@@ -5,8 +5,14 @@ const strMap = (o) =>
   o && Object.fromEntries(Object.entries(o).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]));
 
 export function ym(path, { method = "GET", query, form, json } = {}) {
-  return invoke("ym", { req: { method, path, query: strMap(query), form: strMap(form), json } });
+  return invoke("ym", { req: { method, path, query: strMap(query), form: strMap(form), json } }).catch((e) => {
+    if (/HTTP 401/.test(String(e))) window.dispatchEvent(new Event("ym-unauthorized"));
+    throw e;
+  });
 }
+
+/** Synced (LRC) or plain lyrics: { format: "LRC" | "TEXT", text }. Needs a token. */
+export const lyrics = (id, synced) => invoke("lyrics", { id: String(id), synced: !!synced });
 
 export const trackUrl = (id) => invoke("track_url", { id: String(id) });
 

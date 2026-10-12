@@ -2,7 +2,7 @@
 //! The frontend builds requests; Rust only adds auth headers, dodges CORS and signs stream URLs.
 
 use reqwest::{Method, StatusCode};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -207,4 +207,42 @@ pub async fn avatar_url(api: State<'_, Api>) -> Result<Option<String>, String> {
     Ok(info["default_avatar_id"]
         .as_str()
         .map(|id| format!("https://avatars.yandex.net/get-yapic/{id}/islands-200")))
+}
+
+/// Signing key Yandex's own apps use for the lyrics endpoint (HMAC-SHA256 over id + timestamp).
+const LYRICS_KEY: &[u8] = b"p93jhgh689SBReK6ghtw62";
+
+/// Lyrics of a track: LRC (time-synced) when `synced`, plain text otherwise. Needs a token.
+/// Returns { format: "LRC" | "TEXT", text, writers }.
+#[tauri::command]
+pub async fn lyrics(api: State<'_, Api>, id: String, synced: bool) -> Result<Value, String> {
+    use base64::Engine;
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs();
+    let mut mac = Hmac::<Sha256>::new_from_slice(LYRICS_KEY).map_err(|e| e.to_string())?;
+    mac.update(format!("{id}{ts}").as_bytes());
+    let sign = base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+    let format = if synced { "LRC" } else { "TEXT" };
+
+    let info = api
+        .call(
+            api.request(Method::GET, &format!("{BASE}/tracks/{id}/lyrics"))
+                .query(&[("format", format), ("timeStamp", ts.to_string().as_str()), ("sign", sign.as_str())]),
+        )
+        .await?;
+    let url = info["downloadUrl"].as_str().ok_or("Яндекс не отдал текст")?;
+    let text = api
+        .http
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .text()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({ "format": format, "text": text, "writers": info["writers"] }))
 }

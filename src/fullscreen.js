@@ -92,10 +92,12 @@ export function sync() {
 
   loadClip(t);
   syncVideo();
+  syncLyrics(t);
   syncTime();
 }
 
 function syncTime() {
+  if (isOpen) highlightLyrics();
   if (!isOpen || progress.dragging) return;
   const { time, duration } = player.state;
   progress.set(duration ? time / duration : 0);
@@ -104,6 +106,117 @@ function syncTime() {
 }
 
 player.on((what) => (what === "time" ? syncTime() : sync()));
+
+// ---------- lyrics (synced LRC when Yandex has it, plain text otherwise) ----------
+const lyricsBox = $("#fsLyrics");
+const lyricsCache = new Map(); // track id -> Promise<{ synced, lines: [{ t, text }] }>
+let lyricsFor = null;
+let lyricsLines = [];
+let lyricsActive = -1;
+let userScrolledAt = 0;
+let showLyrics = localStorage.getItem("fsLyrics") === "1";
+
+const lyricsInfo = (t) => {
+  const i = t?.lyricsInfo || {};
+  return { synced: !!i.hasAvailableSyncLyrics, any: !!(i.hasAvailableSyncLyrics || i.hasAvailableTextLyrics || t?.lyricsAvailable) };
+};
+
+/** "[mm:ss.xx] line" → [{ t, text }] sorted by time; a line may carry several timestamps. */
+function parseLrc(text) {
+  const out = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const stamps = [...raw.matchAll(/\[(\d+):(\d+(?:[.:]\d+)?)\]/g)];
+    if (!stamps.length) continue; // metadata like [ar:…] has no time
+    const line = raw.replace(/\[[^\]]*\]/g, "").trim();
+    for (const m of stamps) out.push({ t: +m[1] * 60 + parseFloat(m[2].replace(":", ".")), text: line });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+function fetchLyrics(t) {
+  const id = String(t.id);
+  if (!lyricsCache.has(id)) {
+    const { synced } = lyricsInfo(t);
+    const p = api.lyrics(id, synced).then((r) =>
+      r.format === "LRC"
+        ? { synced: true, lines: parseLrc(r.text) }
+        : { synced: false, lines: r.text.split(/\r?\n/).map((text) => ({ t: null, text: text.trim() })) },
+    );
+    p.catch(() => lyricsCache.delete(id)); // let a later open retry
+    lyricsCache.set(id, p);
+  }
+  return lyricsCache.get(id);
+}
+
+function syncLyrics(t) {
+  const { any } = lyricsInfo(t);
+  fs.classList.toggle("has-lyrics", any);
+  fs.classList.toggle("lyrics", any && showLyrics);
+  $("#fsLyricsBtn").classList.toggle("on", any && showLyrics);
+  if (!any || !showLyrics || lyricsFor === String(t.id)) return;
+  lyricsFor = String(t.id);
+  lyricsLines = [];
+  lyricsActive = -1;
+  lyricsBox.className = "fs-lyrics";
+  lyricsBox.innerHTML = '<div class="lyr-state"><div class="spinner"></div></div>';
+  fetchLyrics(t).then(
+    ({ synced, lines }) => {
+      if (lyricsFor !== String(t.id)) return;
+      lyricsLines = lines;
+      lyricsBox.classList.toggle("plain", !synced);
+      lyricsBox.innerHTML = lines.length
+        ? lines.map((l, i) => `<div class="lyr-line" data-i="${i}">${l.text ? esc(l.text) : "♪"}</div>`).join("")
+        : '<div class="lyr-state">Текст пустой</div>';
+      lyricsBox.scrollTop = 0;
+      highlightLyrics(true);
+    },
+    (e) => {
+      if (lyricsFor !== String(t.id)) return;
+      lyricsFor = null; // reopening retries
+      lyricsBox.innerHTML = `<div class="lyr-state">Текст недоступен<small>${esc(String(e?.message || e)).slice(0, 140)}</small></div>`;
+    },
+  );
+}
+
+function highlightLyrics(force = false) {
+  if (!lyricsLines.length || lyricsBox.classList.contains("plain") || !fs.classList.contains("lyrics")) return;
+  const time = player.state.time + 0.25; // lines read better slightly early
+  let i = -1;
+  for (let lo = 0, hi = lyricsLines.length - 1; lo <= hi; ) {
+    const mid = (lo + hi) >> 1;
+    if (lyricsLines[mid].t <= time) (i = mid), (lo = mid + 1);
+    else hi = mid - 1;
+  }
+  if (i === lyricsActive && !force) return;
+  lyricsActive = i;
+  lyricsBox.querySelectorAll(".lyr-line").forEach((el, k) => {
+    el.classList.toggle("active", k === i);
+    el.classList.toggle("past", k < i);
+  });
+  // Keep the current line centred, unless the user is scrolling through the text themselves.
+  const el = lyricsBox.querySelector(`.lyr-line[data-i="${Math.max(i, 0)}"]`);
+  if (el && Date.now() - userScrolledAt > 2500) {
+    lyricsBox.scrollTo({ top: el.offsetTop - lyricsBox.clientHeight / 2 + el.offsetHeight / 2, behavior: force ? "auto" : "smooth" });
+  }
+}
+
+lyricsBox.addEventListener("wheel", () => (userScrolledAt = Date.now()), { passive: true });
+lyricsBox.addEventListener("touchmove", () => (userScrolledAt = Date.now()), { passive: true });
+lyricsBox.addEventListener("click", (e) => {
+  const line = e.target.closest(".lyr-line");
+  const l = line && lyricsLines[+line.dataset.i];
+  if (l?.t == null || !player.state.duration) return;
+  userScrolledAt = 0;
+  player.seek(l.t / player.state.duration);
+});
+
+function toggleLyrics() {
+  showLyrics = !showLyrics;
+  localStorage.setItem("fsLyrics", showLyrics ? "1" : "0");
+  if (showLyrics) fs.classList.remove("focus"); // lyrics and the unblurred clip don't mix
+  lyricsFor = null;
+  sync();
+}
 
 // ---------- open / close ----------
 export function open() {
@@ -147,6 +260,7 @@ fs.addEventListener("click", (e) => {
   const a = e.target.closest("[data-action]")?.dataset.action;
   if (a === "fs-close") close();
   else if (a === "fs-clip") fs.classList.toggle("focus");
+  else if (a === "fs-lyrics") toggleLyrics();
   else if (a === "fs-os") setOsFullscreen(!fs.classList.contains("os-full"));
 });
 

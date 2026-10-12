@@ -33,19 +33,23 @@ const history = [];
 let current = null;
 let renderSeq = 0;
 
+const sameRoute = (a, b) => a && b && a.name === b.name && JSON.stringify(a.params) === JSON.stringify(b.params);
+
 function go(name, params = {}, { push = true, replace = false } = {}) {
-  if (current && push && !replace) history.push(current);
-  current = { name, params };
+  const next = { name, params };
+  if (sameRoute(current, next)) return; // clicking the page you're on shouldn't stack history
+  if (current && push && !replace) history.push({ ...current, scroll: $("#main").scrollTop });
+  current = next;
   render();
 }
 
 function back() {
   if (!history.length) return go("wave", {}, { push: false });
   current = history.pop();
-  render();
+  render(current.scroll || 0);
 }
 
-async function render() {
+async function render(restoreScroll = 0) {
   const seq = ++renderSeq;
   const alive = () => seq === renderSeq;
   const { name, params } = current;
@@ -53,7 +57,8 @@ async function render() {
   const view = $("#view");
   view.replaceWith(view.cloneNode(false)); // drops old listeners, replays enter animation
   const root = $("#view");
-  $("#main").scrollTop = 0;
+  // instant: .main has smooth scrolling, which would visibly slide every new page to the top
+  $("#main").scrollTo({ top: 0, behavior: "instant" });
 
   const navKey = name === "library" ? `library:${params.tab || "playlists"}` : name;
   $$(".nav-item").forEach((b) => b.classList.toggle("active", (b.dataset.tab ? `${b.dataset.go}:${b.dataset.tab}` : b.dataset.go) === navKey));
@@ -64,6 +69,7 @@ async function render() {
   await (views[name] || views.wave)(root, params, alive);
   if (!alive()) return;
   if (name === "wave") updateWaveHero();
+  if (restoreScroll) $("#main").scrollTo({ top: restoreScroll, behavior: "instant" }); // Back lands where you left the page
   viz.refresh();
 }
 
@@ -396,6 +402,11 @@ async function handleAction(name, el, e) {
     case "play-list":
     case "shuffle-list": {
       const list = views.lists.get(el.dataset.list);
+      if (list?.ready && !list.done) {
+        // big "Мне нравится": play the whole library, not just the pages loaded so far
+        toast("Загружаю все треки…");
+        await list.ready.catch(() => {});
+      }
       if (!list?.tracks.length) return toast("Треки ещё загружаются");
       return player.playList(list.tracks, name === "shuffle-list" ? undefined : 0, list.context, { shuffle: name === "shuffle-list" });
     }
@@ -630,6 +641,10 @@ function openSettings() {
           <div><div class="s-t">Не рекомендовать в волнах</div><div class="s-d">Эти исполнители не будут звучать в Моей волне и других станциях</div></div>
           <div class="blocked" id="blockedList">${blockedList()}</div>
         </div>
+        <div class="setting desktop-only">
+          <div><div class="s-t">Сворачивать в трей при закрытии</div><div class="s-d">Музыка продолжит играть, а YMClient останется в трее у часов</div></div>
+          <button class="switch${closeToTray() ? " on" : ""}" data-s="tray" aria-label="Сворачивать в трей"></button>
+        </div>
         <div class="setting">
           <div><div class="s-t">Статус в Discord</div><div class="s-d">Показывать, что вы слушаете, в профиле Discord</div></div>
           <button class="switch${player.state.rpc ? " on" : ""}" data-s="rpc" aria-label="Discord RPC"></button>
@@ -661,6 +676,10 @@ function openSettings() {
     if (s === "unblock") {
       player.unblockArtist(e.target.closest("[data-id]").dataset.id);
       wrap.querySelector("#blockedList").innerHTML = blockedList();
+    }
+    if (s === "tray") {
+      setCloseToTray(!closeToTray());
+      e.target.closest(".switch").classList.toggle("on", closeToTray());
     }
     if (s === "rpc") {
       player.setRpc(!player.state.rpc);
@@ -698,6 +717,15 @@ $("#tokenForm").addEventListener("submit", async (e) => {
 });
 
 listen("auth-changed", () => boot());
+
+// Token expired or revoked: every request starts failing with 401 — send the user to log in again.
+let unauthorizedShown = false;
+window.addEventListener("ym-unauthorized", () => {
+  if (unauthorizedShown || !$("#login").hidden) return;
+  unauthorizedShown = true;
+  $("#login").hidden = false;
+  toast("Сессия Яндекса истекла — войдите заново", "error");
+});
 listen("auth-error", (e) => toast(`Ошибка входа: ${e.payload}`, "error"));
 
 async function renderSidebarPlaylists() {
@@ -734,6 +762,7 @@ async function boot() {
   try {
     const me = await api.loadAccount();
     login.hidden = true;
+    unauthorizedShown = false;
     $("#avatar").textContent = (me.name || "?").trim()[0].toUpperCase();
     loadAvatar();
     $("#accountName").textContent = me.name;
@@ -760,9 +789,20 @@ document.addEventListener("keydown", (e) => {
     $("#btnEq").classList.remove("open");
     return;
   }
+  // Ctrl+F / Ctrl+L before the typing check: they must also work from inside a field.
+  // e.code is layout-independent (on a Russian layout e.key is "а"), and preventDefault keeps
+  // WebView2's own find bar from popping up.
+  if (e.ctrlKey && (e.code === "KeyF" || e.code === "KeyL")) {
+    e.preventDefault();
+    if (current?.name === "search") $("#q")?.focus();
+    else go("search");
+    return;
+  }
   if (typing) return;
   if (e.code === "Space") {
     e.preventDefault();
+    // Otherwise the button clicked last (e.g. "next") keeps focus and Space re-clicks it on keyup.
+    if (e.target instanceof HTMLButtonElement) e.target.blur();
     player.toggle();
   } else if (e.ctrlKey && e.key === "ArrowRight") player.next();
   else if (e.ctrlKey && e.key === "ArrowLeft") player.prev();
@@ -770,8 +810,74 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowLeft" && player.state.duration) player.seek((player.state.time - 10) / player.state.duration);
   else if (e.key === "ArrowUp") (e.preventDefault(), player.setVolume(player.state.volume + 0.05));
   else if (e.key === "ArrowDown") (e.preventDefault(), player.setVolume(player.state.volume - 0.05));
-  else if (e.ctrlKey && e.key.toLowerCase() === "f") (e.preventDefault(), go("search"));
+  else if (e.code === "KeyM" && !e.ctrlKey) player.toggleMute();
+  else if (e.code === "KeyL" && !e.ctrlKey && player.state.track) toggleLike(player.state.track);
+  else if (e.code === "KeyQ" && !e.ctrlKey) togglePanel("queue");
+  else if (e.code === "KeyE" && !e.ctrlKey) togglePanel("eq");
+  else if (e.code === "KeyF" && !e.ctrlKey) fullscreen.isOpenNow() ? fullscreen.close() : fullscreen.open();
+  else if (e.key === "?" || (e.shiftKey && e.code === "Slash")) showShortcuts();
 });
+
+const SHORTCUTS = [
+  ["Пробел", "Играть / пауза"],
+  ["← / →", "Перемотка на 10 секунд"],
+  ["Ctrl + ← / →", "Предыдущий / следующий трек"],
+  ["↑ / ↓", "Громкость"],
+  ["M", "Без звука"],
+  ["L", "Нравится"],
+  ["F", "Полноэкранный плеер"],
+  ["Q", "Очередь"],
+  ["E", "Эквалайзер"],
+  ["Ctrl + F", "Поиск"],
+  ["Esc", "Закрыть панели"],
+  ["?", "Эта подсказка"],
+];
+
+function showShortcuts() {
+  if ($(".modal-backdrop")) return;
+  const wrap = document.createElement("div");
+  wrap.className = "modal-backdrop";
+  wrap.innerHTML = `
+    <div class="modal shortcuts" role="dialog" aria-modal="true">
+      <h3>Горячие клавиши</h3>
+      <div class="shortcut-list">${SHORTCUTS.map(([k, d]) => `<div class="shortcut"><span>${esc(d)}</span><kbd>${esc(k)}</kbd></div>`).join("")}</div>
+      <div class="modal-actions"><button class="btn btn-ghost" data-r="close">Понятно</button></div>
+    </div>`;
+  const close = () => {
+    wrap.classList.remove("in");
+    document.removeEventListener("keydown", onKey, true);
+    setTimeout(() => wrap.remove(), 200);
+  };
+  const onKey = (e) => e.key === "Escape" && (e.stopPropagation(), close());
+  wrap.addEventListener("click", (e) => (e.target === wrap || e.target.closest('[data-r="close"]')) && close());
+  document.addEventListener("keydown", onKey, true);
+  document.body.append(wrap);
+  requestAnimationFrame(() => wrap.classList.add("in"));
+}
+
+// ======================= desktop: tray & close-to-tray =======================
+const closeToTray = () => localStorage.getItem("closeToTray") === "1";
+const setCloseToTray = (on) => localStorage.setItem("closeToTray", on ? "1" : "0");
+
+if (!player.IOS) {
+  listen("tray", ({ payload }) => {
+    if (payload === "toggle") player.toggle();
+    else if (payload === "next") player.next();
+    else if (payload === "prev") player.prev();
+  });
+  appWindow.onCloseRequested((e) => {
+    if (!closeToTray()) return;
+    e.preventDefault();
+    appWindow.hide();
+  });
+  // Tray tooltip shows what's playing.
+  player.on((what) => {
+    if (what !== "track" && what !== "state") return;
+    const t = player.state.track;
+    const text = t ? `${player.state.playing ? "▶" : "❚❚"} ${t.title} — ${api.artistsOf(t)}` : "YMClient";
+    invoke("tray_tooltip", { text }).catch(() => {});
+  });
+}
 document.addEventListener("mouseup", (e) => {
   if (e.button === 3) back();
 });
