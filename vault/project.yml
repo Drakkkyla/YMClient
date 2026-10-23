@@ -1,0 +1,33 @@
+# XcodeGen spec for Hush (private encrypted photo vault). The .xcodeproj is generated on the
+# CI Mac (scripts/build-ipa.sh); nothing Xcode-generated is committed.
+name: Hush
+options:
+  bundleIdPrefix: com.ymclient
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  Hush:
+    type: application
+    platform: iOS
+    sources: [Hush]
+    scheme: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ymclient.hush
+        PRODUCT_NAME: Hush
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Hush
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_NSFaceIDUsageDescription: "Face ID открывает Hush без ввода PIN."
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Hush переносит выбранные фото и видео (в том числе из «Скрытых») в зашифрованное хранилище."
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Unsigned build: Sideloadly / AltStore sign it with the user's Apple ID at install time.
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""

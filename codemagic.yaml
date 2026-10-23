@@ -2,6 +2,7 @@
 #   ios       → unsigned YMClient.ipa (sideload with Sideloadly)
 #   macos     → universal (Apple Silicon + Intel) YMClient .dmg
 #   ios-probe → unsigned YMProbe.ipa (background-playback test app)
+#   vault     → unsigned Hush.ipa (private encrypted photo vault, vault/)
 # Start one from the Codemagic dashboard ("Start new build" → pick the workflow);
 # the .ipa / .dmg shows up under the build's Artifacts.
 workflows:
@@ -78,3 +79,13 @@ workflows:
 
     artifacts:
       - "**/YMProbe.ipa"
+
+  vault:
+    name: Hush iOS (unsigned IPA)
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    scripts:
+      - name: Build unsigned Hush.ipa
+        script: bash vault/scripts/build-ipa.sh
+    artifacts:
+      - vault/Hush.ipa

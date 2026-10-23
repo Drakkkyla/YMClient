@@ -1,0 +1,13 @@
+# AppVeyor: builds the unsigned Hush.ipa (private photo vault, vault/) on a Mac.
+# Use it from a second AppVeyor project on this repo: Settings → General →
+# "Custom configuration .yml file name" = appveyor-vault.yml. The .ipa is under "Artifacts".
+version: "{build}"
+image: macos-sonoma
+branches:
+  only:
+    - main
+build_script:
+  - sh: bash vault/scripts/build-ipa.sh
+artifacts:
+  - path: vault/Hush.ipa
+    name: Hush
