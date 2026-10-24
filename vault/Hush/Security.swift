@@ -60,6 +60,68 @@ enum Crypto {
   static func open(_ data: Data) throws -> Data {
     try AES.GCM.open(AES.GCM.SealedBox(combined: data), using: key)
   }
+
+  // MARK: streaming (large videos)
+
+  /// Chunked file format: magic, then [UInt32 LE length][AES-GCM combined box] per 1 MB chunk,
+  /// so multi-GB videos are never held in memory. Files without the magic are single-box (v1).
+  private static let magic = Data("HUSHv2\0\0".utf8)
+  private static let chunk = 1 << 20
+
+  static func sealFile(from src: URL, to dest: URL) throws {
+    FileManager.default.createFile(
+      atPath: dest.path, contents: nil, attributes: [.protectionKey: FileProtectionType.complete])
+    let input = try FileHandle(forReadingFrom: src)
+    let output = try FileHandle(forWritingTo: dest)
+    defer {
+      try? input.close()
+      try? output.close()
+    }
+    try output.write(contentsOf: magic)
+    while let block = try input.read(upToCount: chunk), !block.isEmpty {
+      try autoreleasepool {
+        let box = try seal(block)
+        var len = UInt32(box.count).littleEndian
+        try output.write(contentsOf: Data(bytes: &len, count: 4))
+        try output.write(contentsOf: box)
+      }
+    }
+  }
+
+  static func openFile(from src: URL, to dest: URL) throws {
+    FileManager.default.createFile(
+      atPath: dest.path, contents: nil, attributes: [.protectionKey: FileProtectionType.complete])
+    let input = try FileHandle(forReadingFrom: src)
+    defer { try? input.close() }
+    guard try input.read(upToCount: magic.count) == magic else {
+      // v1: one sealed box for the whole file
+      try open(Data(contentsOf: src, options: .mappedIfSafe)).write(to: dest, options: .completeFileProtection)
+      return
+    }
+    let output = try FileHandle(forWritingTo: dest)
+    defer { try? output.close() }
+    while let header = try input.read(upToCount: 4), header.count == 4 {
+      let len = header.withUnsafeBytes { Int(UInt32(littleEndian: $0.loadUnaligned(as: UInt32.self))) }
+      guard let box = try input.read(upToCount: len), box.count == len else { throw Failure.sealFailed }
+      try autoreleasepool { try output.write(contentsOf: open(box)) }
+    }
+  }
+
+  /// Whole-file decrypt into memory (photos); understands both formats.
+  static func openFile(_ src: URL) throws -> Data {
+    let data = try Data(contentsOf: src, options: .mappedIfSafe)
+    guard data.starts(with: magic) else { return try open(data) }
+    var out = Data()
+    var i = data.startIndex + magic.count
+    while i + 4 <= data.endIndex {
+      let len = data[i..<i + 4].withUnsafeBytes { Int(UInt32(littleEndian: $0.loadUnaligned(as: UInt32.self))) }
+      i += 4
+      guard i + len <= data.endIndex else { throw Failure.sealFailed }
+      out.append(try open(data[i..<i + len]))
+      i += len
+    }
+    return out
+  }
 }
 
 /// 6-digit PIN, stored as a salted SHA-256 hash. Wrong attempts lock input for a while.

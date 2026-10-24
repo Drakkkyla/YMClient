@@ -30,6 +30,7 @@ struct GalleryView: View {
   @State private var pickedIds: [String] = []
   @State private var askDeleteOriginals = false
   @State private var showRecentlyDeletedNote = false
+  @State private var deleteError: String?
 
   private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
 
@@ -117,6 +118,14 @@ struct GalleryView: View {
       Button("Понятно", role: .cancel) {}
     } message: {
       Text(Self.recentlyDeletedNote)
+    }
+    .alert(
+      "Не удалось удалить из галереи",
+      isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })
+    ) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(deleteError ?? "")
     }
   }
 
@@ -221,8 +230,14 @@ struct GalleryView: View {
     let ids = pickedIds
     Task {
       _ = await Library.requestAccess()
-      let ok = await Library.delete(Library.assets(withIds: ids))
-      await MainActor.run { if ok { showRecentlyDeletedNote = true } }
+      let result = await Library.delete(ids: ids)
+      await MainActor.run {
+        switch result {
+        case .deleted: showRecentlyDeletedNote = true
+        case .cancelled: break
+        case .failed(let message): deleteError = message
+        }
+      }
     }
   }
 }

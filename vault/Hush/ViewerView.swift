@@ -28,12 +28,11 @@ struct ViewerView: View {
       Color.black.ignoresSafeArea()
       TabView(selection: $index) {
         ForEach(Array(store.items.enumerated()), id: \.element.id) { i, item in
-          MediaPage(item: item, active: i == index).tag(i)
+          MediaPage(item: item, active: i == index, onTap: toggleChrome).tag(i)
         }
       }
       .tabViewStyle(.page(indexDisplayMode: .never))
       .ignoresSafeArea()
-      .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { chrome.toggle() } }
 
       if chrome { controls }
     }
@@ -65,16 +64,17 @@ struct ViewerView: View {
         }
         Spacer()
         circleButton("square.and.arrow.up") { shareCurrent() }
-      }
-      Spacer()
-      HStack {
-        Spacer()
         circleButton("trash") { confirmDelete = true }
       }
+      Spacer()
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 8)
     .transition(.opacity)
+  }
+
+  private func toggleChrome() {
+    withAnimation(.easeInOut(duration: 0.2)) { chrome.toggle() }
   }
 
   private func circleButton(_ icon: String, action: @escaping () -> Void) -> some View {
@@ -101,20 +101,25 @@ struct MediaPage: View {
   @EnvironmentObject var store: VaultStore
   let item: VaultItem
   let active: Bool
+  let onTap: () -> Void
   @State private var image: UIImage?
   @State private var player: AVPlayer?
   @State private var videoURL: URL?
+  @State private var failed = false
 
   var body: some View {
     Group {
-      if item.kind == .video {
+      if failed {
+        Label("Не удалось открыть", systemImage: "exclamationmark.triangle")
+          .foregroundStyle(.secondary)
+      } else if item.kind == .video {
         if let player {
-          VideoPlayer(player: player)
+          PlayerView(player: player)
         } else {
           ProgressView()
         }
       } else if let image {
-        ZoomableImage(image: image)
+        ZoomableImage(image: image, onTap: onTap)
       } else {
         ProgressView()
       }
@@ -122,33 +127,71 @@ struct MediaPage: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .task(id: item.id) { await load() }
     .onChange(of: active) { isActive in
-      if !isActive { player?.pause() }
+      if isActive { play() } else { player?.pause() }
     }
     .onDisappear {
       player?.pause()
+      player = nil
       if let url = videoURL { try? FileManager.default.removeItem(at: url) }
+      videoURL = nil
     }
   }
 
   private func load() async {
     if item.kind == .video {
-      guard let url = await store.decryptToTemp(item) else { return }
+      guard player == nil else { return }
+      guard let url = await store.decryptToTemp(item) else {
+        await MainActor.run { failed = true }
+        return
+      }
       await MainActor.run {
         videoURL = url
         player = AVPlayer(url: url)
+        if active { play() }
       }
     } else {
       let full = await store.fullImage(item)
-      await MainActor.run { image = full }
+      await MainActor.run {
+        image = full
+        failed = full == nil
+      }
     }
+  }
+
+  private func play() {
+    guard let player else { return }
+    // Sound even with the silent switch on, like the Photos app.
+    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+    try? AVAudioSession.sharedInstance().setActive(true)
+    player.play()
+  }
+}
+
+/// System video player (scrubber, play/pause, AirPlay, fullscreen, PiP off).
+struct PlayerView: UIViewControllerRepresentable {
+  let player: AVPlayer
+
+  func makeUIViewController(context: Context) -> AVPlayerViewController {
+    let controller = AVPlayerViewController()
+    controller.player = player
+    controller.allowsPictureInPicturePlayback = false
+    controller.entersFullScreenWhenPlaybackBegins = false
+    controller.videoGravity = .resizeAspect
+    controller.view.backgroundColor = .black
+    return controller
+  }
+
+  func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+    if controller.player !== player { controller.player = player }
   }
 }
 
 /// UIScrollView-backed image: pinch to zoom, pan while zoomed, double-tap to zoom in/out.
 struct ZoomableImage: UIViewRepresentable {
   let image: UIImage
+  var onTap: () -> Void = {}
 
-  func makeCoordinator() -> Coordinator { Coordinator() }
+  func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap) }
 
   func makeUIView(context: Context) -> UIScrollView {
     let scroll = UIScrollView()
@@ -178,15 +221,25 @@ struct ZoomableImage: UIViewRepresentable {
       target: context.coordinator, action: #selector(Coordinator.doubleTapped(_:)))
     doubleTap.numberOfTapsRequired = 2
     scroll.addGestureRecognizer(doubleTap)
+    let singleTap = UITapGestureRecognizer(
+      target: context.coordinator, action: #selector(Coordinator.singleTapped))
+    singleTap.require(toFail: doubleTap)
+    scroll.addGestureRecognizer(singleTap)
     return scroll
   }
 
   func updateUIView(_ scroll: UIScrollView, context: Context) {
     context.coordinator.imageView?.image = image
+    context.coordinator.onTap = onTap
   }
 
   final class Coordinator: NSObject, UIScrollViewDelegate {
     weak var imageView: UIImageView?
+    var onTap: () -> Void
+
+    init(onTap: @escaping () -> Void) { self.onTap = onTap }
+
+    @objc func singleTapped() { onTap() }
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 

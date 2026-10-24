@@ -13,9 +13,9 @@ struct HiddenImportView: View {
   @State private var selected = Set<String>()
   @State private var loading = true
   @State private var importing = false
-  @State private var imported: [PHAsset] = []
-  @State private var askDelete = false
   @State private var showNote = false
+  @State private var deleteError: String?
+  @AppStorage("deleteHiddenAfterImport") private var deleteAfter = true
 
   private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
 
@@ -43,6 +43,11 @@ struct HiddenImportView: View {
         }
         .safeAreaInset(edge: .bottom) {
           if !assets.isEmpty {
+            VStack(spacing: 8) {
+            Toggle("Удалить из «Скрытых» после переноса", isOn: $deleteAfter)
+              .font(.subheadline)
+              .padding(.horizontal, 20)
+              .padding(.top, 10)
             Button {
               Task { await runImport() }
             } label: {
@@ -55,26 +60,20 @@ struct HiddenImportView: View {
             .disabled(selected.isEmpty || importing)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+            }
             .background(.ultraThinMaterial)
           }
         }
     }
     .task { await load() }
     .interactiveDismissDisabled(importing)
-    .confirmationDialog(
-      "Удалить оригиналы из «Скрытых»?", isPresented: $askDelete, titleVisibility: .visible
+    .alert(
+      "Не удалось удалить из «Скрытых»",
+      isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })
     ) {
-      Button("Удалить из галереи", role: .destructive) {
-        Task {
-          let ok = await Library.delete(imported)
-          await MainActor.run {
-            if ok { showNote = true } else { dismiss() }
-          }
-        }
-      }
-      Button("Оставить", role: .cancel) { dismiss() }
+      Button("OK", role: .cancel) {}
     } message: {
-      Text("\(imported.count) уже зашифрованы в Hush. iOS попросит подтвердить удаление.")
+      Text((deleteError ?? "") + "\n\nФото уже в Hush. Удалите оригиналы вручную в «Фото».")
     }
     .alert("Почти готово", isPresented: $showNote) {
       Button("Понятно") { dismiss() }
@@ -137,14 +136,24 @@ struct HiddenImportView: View {
     let chosen = assets.filter { selected.contains($0.localIdentifier) }
     await MainActor.run { importing = true }
     let done = await store.importAssets(chosen)
+    let doneIds = done.map(\.localIdentifier)
     await MainActor.run {
-      importing = false
-      imported = done
-      let doneIds = Set(done.map(\.localIdentifier))
-      assets.removeAll { doneIds.contains($0.localIdentifier) }
-      selected.subtract(doneIds)
-      if !done.isEmpty { askDelete = true }
+      let idSet = Set(doneIds)
+      assets.removeAll { idSet.contains($0.localIdentifier) }
+      selected.subtract(idSet)
     }
+    if deleteAfter && !doneIds.isEmpty {
+      // iOS asks the user to confirm deleting from the library.
+      let result = await Library.delete(ids: doneIds)
+      await MainActor.run {
+        switch result {
+        case .deleted: showNote = true
+        case .cancelled: break
+        case .failed(let message): deleteError = message
+        }
+      }
+    }
+    await MainActor.run { importing = false }
   }
 }
 

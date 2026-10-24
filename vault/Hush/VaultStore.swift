@@ -80,7 +80,7 @@ final class VaultStore: ObservableObject {
   func fullImage(_ item: VaultItem) async -> UIImage? {
     let url = fileURL(item)
     return await Task.detached(priority: .userInitiated) { () -> UIImage? in
-      guard let sealed = try? Data(contentsOf: url), let plain = try? Crypto.open(sealed) else { return nil }
+      guard let plain = try? Crypto.openFile(url) else { return nil }
       return UIImage(data: plain)
     }.value
   }
@@ -91,11 +91,11 @@ final class VaultStore: ObservableObject {
     let src = fileURL(item)
     let dest = Self.tempDir.appendingPathComponent("\(UUID().uuidString).\(item.ext)")
     return await Task.detached(priority: .userInitiated) { () -> URL? in
-      guard let sealed = try? Data(contentsOf: src), let plain = try? Crypto.open(sealed) else { return nil }
       do {
-        try plain.write(to: dest, options: [.atomic, .completeFileProtection])
+        try Crypto.openFile(from: src, to: dest)
         return dest
       } catch {
+        try? FileManager.default.removeItem(at: dest)
         return nil
       }
     }.value
@@ -113,37 +113,54 @@ final class VaultStore: ObservableObject {
 
   // MARK: writing
 
-  /// Encrypts original + thumbnail off the main thread and returns the new item.
-  private func write(data: Data, kind: VaultItem.Kind, ext: String) async throws -> VaultItem {
-    let item = VaultItem(id: UUID(), kind: kind, ext: ext.lowercased(), added: Date())
+  /// Encrypts a photo + its thumbnail off the main thread and returns the new item.
+  private func write(data: Data, ext: String) async throws -> VaultItem {
+    let item = VaultItem(id: UUID(), kind: .photo, ext: ext.lowercased(), added: Date())
     let fileURL = fileURL(item)
     let thumbURL = thumbURL(item)
     try await Task.detached(priority: .userInitiated) {
       try Crypto.seal(data).write(to: fileURL, options: [.atomic, .completeFileProtection])
-      if let thumb = Self.makeThumbnail(data: data, kind: kind, ext: ext),
-        let jpeg = thumb.jpegData(compressionQuality: 0.8)
-      {
+      if let thumb = Self.photoThumbnail(data), let jpeg = thumb.jpegData(compressionQuality: 0.8) {
         try Crypto.seal(jpeg).write(to: thumbURL, options: [.atomic, .completeFileProtection])
       }
     }.value
     return item
   }
 
-  private static func makeThumbnail(data: Data, kind: VaultItem.Kind, ext: String) -> UIImage? {
-    let side: CGFloat = 360
-    if kind == .photo {
-      guard let image = UIImage(data: data) else { return nil }
-      let scale = side / min(image.size.width, image.size.height)
-      let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-      return image.preparingThumbnail(of: size) ?? image
-    }
-    // video: grab the first frame from a short-lived decrypted temp copy
-    let tmp = tempDir.appendingPathComponent("\(UUID().uuidString).\(ext)")
-    defer { try? FileManager.default.removeItem(at: tmp) }
-    guard (try? data.write(to: tmp, options: .completeFileProtection)) != nil else { return nil }
-    let gen = AVAssetImageGenerator(asset: AVURLAsset(url: tmp))
+  /// Encrypts a video file chunk by chunk (never fully in memory). The source file is removed.
+  private func write(videoAt src: URL) async throws -> VaultItem {
+    let ext = src.pathExtension.isEmpty ? "mov" : src.pathExtension
+    let item = VaultItem(id: UUID(), kind: .video, ext: ext.lowercased(), added: Date())
+    let fileURL = fileURL(item)
+    let thumbURL = thumbURL(item)
+    defer { try? FileManager.default.removeItem(at: src) }
+    try await Task.detached(priority: .userInitiated) {
+      do {
+        try Crypto.sealFile(from: src, to: fileURL)
+      } catch {
+        try? FileManager.default.removeItem(at: fileURL)
+        throw error
+      }
+      if let thumb = Self.videoThumbnail(src), let jpeg = thumb.jpegData(compressionQuality: 0.8) {
+        try Crypto.seal(jpeg).write(to: thumbURL, options: [.atomic, .completeFileProtection])
+      }
+    }.value
+    return item
+  }
+
+  private static let thumbSide: CGFloat = 360
+
+  private static func photoThumbnail(_ data: Data) -> UIImage? {
+    guard let image = UIImage(data: data) else { return nil }
+    let scale = thumbSide / min(image.size.width, image.size.height)
+    let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+    return image.preparingThumbnail(of: size) ?? image
+  }
+
+  private static func videoThumbnail(_ url: URL) -> UIImage? {
+    let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
     gen.appliesPreferredTrackTransform = true
-    gen.maximumSize = CGSize(width: side * 2, height: side * 2)
+    gen.maximumSize = CGSize(width: thumbSide * 2, height: thumbSide * 2)
     guard let cg = try? gen.copyCGImage(at: .zero, actualTime: nil) else { return nil }
     return UIImage(cgImage: cg)
   }
@@ -178,10 +195,15 @@ final class VaultStore: ObservableObject {
     var done: [PHAsset] = []
     for (i, asset) in assets.enumerated() {
       progress = "Переношу \(i + 1) из \(assets.count)"
-      guard let loaded = await Library.data(for: asset) else { continue }
-      let (data, ext) = loaded
-      let kind: VaultItem.Kind = asset.mediaType == .video ? .video : .photo
-      if let item = try? await write(data: data, kind: kind, ext: ext) {
+      var item: VaultItem?
+      if asset.mediaType == .video {
+        if let file = await Library.exportVideo(asset) {
+          item = try? await write(videoAt: file)
+        }
+      } else if let loaded = await Library.photoData(for: asset) {
+        item = try? await write(data: loaded.0, ext: loaded.1)
+      }
+      if let item {
         insert(item)
         done.append(asset)
       }
@@ -197,17 +219,39 @@ final class VaultStore: ObservableObject {
     var ids: [String] = []
     for (i, entry) in picked.enumerated() {
       progress = "Переношу \(i + 1) из \(picked.count)"
-      guard let data = try? await entry.loadTransferable(type: Data.self) else { continue }
-      let type = entry.supportedContentTypes.first
-      let isVideo = type?.conforms(to: .movie) ?? false
-      let ext = type?.preferredFilenameExtension ?? (isVideo ? "mov" : "jpg")
-      if let item = try? await write(data: data, kind: isVideo ? .video : .photo, ext: ext) {
+      let isVideo = entry.supportedContentTypes.contains { $0.conforms(to: .movie) }
+      var item: VaultItem?
+      if isVideo {
+        if let movie = try? await entry.loadTransferable(type: MovieFile.self) {
+          item = try? await write(videoAt: movie.url)
+        }
+      } else if let data = try? await entry.loadTransferable(type: Data.self) {
+        let ext = entry.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+        item = try? await write(data: data, ext: ext)
+      }
+      if let item {
         insert(item)
         if let id = entry.itemIdentifier { ids.append(id) }
       }
     }
     progress = nil
     return ids
+  }
+}
+
+/// Picker video delivered as a file (copied into our temp dir) instead of in-memory Data.
+struct MovieFile: Transferable {
+  let url: URL
+
+  static var transferRepresentation: some TransferRepresentation {
+    FileRepresentation(contentType: .movie) { movie in
+      SentTransferredFile(movie.url)
+    } importing: { received in
+      let ext = received.file.pathExtension.isEmpty ? "mov" : received.file.pathExtension
+      let copy = VaultStore.tempDir.appendingPathComponent("\(UUID().uuidString).\(ext)")
+      try FileManager.default.copyItem(at: received.file, to: copy)
+      return MovieFile(url: copy)
+    }
   }
 }
 
@@ -253,24 +297,8 @@ enum Library {
     }
   }
 
-  /// Original bytes + file extension of an asset.
-  static func data(for asset: PHAsset) async -> (Data, String)? {
-    if asset.mediaType == .video {
-      let options = PHVideoRequestOptions()
-      options.isNetworkAccessAllowed = true
-      options.version = .current
-      options.deliveryMode = .highQualityFormat
-      return await withCheckedContinuation { cont in
-        PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { av, _, _ in
-          guard let url = (av as? AVURLAsset)?.url, let data = try? Data(contentsOf: url) else {
-            cont.resume(returning: nil)
-            return
-          }
-          let ext = url.pathExtension.isEmpty ? "mov" : url.pathExtension.lowercased()
-          cont.resume(returning: (data, ext))
-        }
-      }
-    }
+  /// Original photo bytes + file extension.
+  static func photoData(for asset: PHAsset) async -> (Data, String)? {
     let options = PHImageRequestOptions()
     options.isNetworkAccessAllowed = true
     options.version = .current
@@ -288,17 +316,49 @@ enum Library {
     }
   }
 
-  /// Deletes originals from the Photos library. iOS shows its own confirmation; returns false
-  /// if the user declined. (They then sit in "Recently Deleted" for 30 days — iOS rule.)
-  static func delete(_ assets: [PHAsset]) async -> Bool {
-    guard !assets.isEmpty else { return true }
+  /// Writes a video (the edited version if there is one) to a temp file. Works for slo-mo and
+  /// edited clips too, where requestAVAsset returns a composition instead of a file URL.
+  static func exportVideo(_ asset: PHAsset) async -> URL? {
+    let resources = PHAssetResource.assetResources(for: asset)
+    guard
+      let resource = resources.first(where: { $0.type == .fullSizeVideo })
+        ?? resources.first(where: { $0.type == .video })
+    else { return nil }
+    let ext = (resource.originalFilename as NSString).pathExtension
+    let dest = VaultStore.tempDir.appendingPathComponent(
+      "\(UUID().uuidString).\(ext.isEmpty ? "mov" : ext.lowercased())")
+    let options = PHAssetResourceRequestOptions()
+    options.isNetworkAccessAllowed = true
+    return await withCheckedContinuation { cont in
+      PHAssetResourceManager.default().writeData(for: resource, toFile: dest, options: options) { error in
+        if error != nil { try? FileManager.default.removeItem(at: dest) }
+        cont.resume(returning: error == nil ? dest : nil)
+      }
+    }
+  }
+
+  enum DeleteResult {
+    case deleted, cancelled
+    case failed(String)
+  }
+
+  /// Deletes originals from the Photos library (Hidden ones included). iOS shows its own
+  /// confirmation. They then sit in "Recently Deleted" for 30 days — iOS rule.
+  static func delete(ids: [String]) async -> DeleteResult {
+    // Fresh objects: the ones fetched before a long import can be stale.
+    let found = assets(withIds: ids)
+    guard !found.isEmpty else { return .failed("Фото не найдены в медиатеке") }
     do {
       try await PHPhotoLibrary.shared().performChanges {
-        PHAssetChangeRequest.deleteAssets(assets as NSArray)
+        PHAssetChangeRequest.deleteAssets(found as NSArray)
       }
-      return true
+      return .deleted
     } catch {
-      return false
+      let ns = error as NSError
+      if ns.domain == PHPhotosErrorDomain && ns.code == PHPhotosError.userCancelled.rawValue {
+        return .cancelled
+      }
+      return .failed("\(ns.localizedDescription) (\(ns.domain) \(ns.code))")
     }
   }
 }
