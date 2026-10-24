@@ -2,3 +2,8 @@ Hush.xcodeproj
 build
 Payload
 *.ipa
+# xtool / SwiftPM
+/.build
+/xtool
+/.bsp
+/.swiftpm

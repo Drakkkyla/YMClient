@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>Hush</string>
+  <key>NSFaceIDUsageDescription</key>
+  <string>Face ID открывает Hush без ввода PIN.</string>
+  <key>NSPhotoLibraryUsageDescription</key>
+  <string>Hush переносит выбранные фото и видео (в том числе из «Скрытых») в зашифрованное хранилище.</string>
+</dict>
+</plist>

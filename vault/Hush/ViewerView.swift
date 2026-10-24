@@ -1,4 +1,8 @@
 import AVKit
+// Same cross-import overlay issue as PhotosUI under xtool.
+#if canImport(_AVKit_SwiftUI)
+  import _AVKit_SwiftUI
+#endif
 import SwiftUI
 
 /// Full-screen pager over the vault: swipe between items, pinch / double-tap to zoom photos,

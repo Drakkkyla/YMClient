@@ -2,6 +2,10 @@ import AVFoundation
 import Foundation
 import Photos
 import PhotosUI
+// xtool (SwiftPM explicit modules) does not load the PhotosUI+SwiftUI cross-import overlay.
+#if canImport(_PhotosUI_SwiftUI)
+  import _PhotosUI_SwiftUI
+#endif
 import SwiftUI
 import UniformTypeIdentifiers
 

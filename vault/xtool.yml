@@ -1,0 +1,6 @@
+version: 1
+bundleID: com.ymclient.hush
+product: Hush
+# Extra Info.plist keys (Face ID / Photos permission texts, display name) merged by xtool.
+infoPath: xtool-Info.plist
+iconPath: Hush/Assets.xcassets/AppIcon.appiconset/icon.png
